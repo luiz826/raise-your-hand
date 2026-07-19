@@ -1,0 +1,10 @@
+/* Host element only — all real UI lives in a shadow root to avoid YouTube's
+   CSS bleeding in (and vice versa). */
+#ryh-root {
+  position: fixed;
+  z-index: 2147483000;
+  top: 0;
+  left: 0;
+  width: 0;
+  height: 0;
+}

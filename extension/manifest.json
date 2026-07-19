@@ -1,0 +1,29 @@
+{
+  "manifest_version": 3,
+  "name": "Raise Your Hand",
+  "version": "0.2.0",
+  "description": "Pause a YouTube university lecture and ask a course-aware teaching assistant that knows the whole playlist.",
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "action": {
+    "default_title": "Raise Your Hand — pause a lecture and press Shift+A to ask",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "content_scripts": [
+    {
+      "matches": ["*://www.youtube.com/watch*"],
+      "js": ["content.js"],
+      "css": ["content.css"],
+      "run_at": "document_idle"
+    }
+  ],
+  "permissions": ["storage"],
+  "host_permissions": ["http://localhost:8787/*"]
+}

@@ -1,0 +1,7 @@
+node_modules/
+data/
+dist/
+.env
+.DS_Store
+eval-results/
+raise-your-hand-extension.zip

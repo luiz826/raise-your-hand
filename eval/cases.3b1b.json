@@ -1,0 +1,84 @@
+{
+  "course": "3b1b",
+  "playlistId": "PLZHQObOWTQDNU6R1_67000Dx_ZCJB-3pi",
+  "cases": [
+    {
+      "id": "b-fwd-learning",
+      "category": "forward_reference",
+      "lecture": 1,
+      "time": "10:00",
+      "question": "ok but how does the network actually find the right weights?",
+      "expect_reference_lectures": [2],
+      "rubric": "Must point to chapter 2 (gradient descent) — chapters 3-4 (backpropagation) may also be mentioned. Must NOT explain gradient descent or backprop mechanics."
+    },
+    {
+      "id": "b-fwd-chatgpt",
+      "category": "forward_reference",
+      "lecture": 1,
+      "time": "14:00",
+      "question": "is this basically how ChatGPT works too?",
+      "expect_reference_lectures": [5, 6],
+      "rubric": "Must connect at a high level (same core ideas: layers, weights, learned parameters) and point to the later chapters on LLMs (video 5) and transformers (video 6) without explaining transformers or attention."
+    },
+    {
+      "id": "b-sll-relu",
+      "category": "same_lecture_later",
+      "lecture": 1,
+      "time": "12:00",
+      "question": "is sigmoid what people actually use in modern networks?",
+      "rubric": "ReLU is mentioned at the very end of THIS video (~17m, unseen at pause 12m). Must indicate modern networks mostly use something else and that this video touches on it at the end (naming ReLU is fine); must not fully explain ReLU's properties."
+    },
+    {
+      "id": "b-fwd-attention",
+      "category": "forward_reference",
+      "lecture": 6,
+      "time": "8:00",
+      "question": "what exactly does the attention block do?",
+      "expect_reference_lectures": [7],
+      "rubric": "Attention is named early in this video but explained in the NEXT video (chapter on attention). At most a one-sentence high-level description (lets vectors pass information/context to each other) plus a pointer to the next chapter; explaining Q/K/V or the attention formula fails scope."
+    },
+    {
+      "id": "b-back-embedding",
+      "category": "backward_reference",
+      "lecture": 7,
+      "time": "10:00",
+      "question": "wait, what was an embedding again?",
+      "expect_reference_lectures": [6],
+      "rubric": "Seen material — brief recap (tokens mapped to vectors whose directions encode meaning) citing the previous video (embedding matrix, ~12m of video 6)."
+    },
+    {
+      "id": "b-ground-cost",
+      "category": "grounding",
+      "lecture": 2,
+      "time": "12:00",
+      "question": "what does the cost function actually measure?",
+      "rubric": "Covered before the pause (~3-4m): sum of squared differences between the network's output and the desired output, averaged over training examples. Must answer directly from that; no deflection."
+    },
+    {
+      "id": "b-miscon-edges",
+      "category": "misconception",
+      "lecture": 1,
+      "time": "17:00",
+      "question": "so the hidden-layer neurons literally learn to detect edges, right?",
+      "expect_reference_lectures": [2],
+      "rubric": "The edges-to-patterns story was presented as a HOPE for what the layers might do, not a fact. Must flag it as the motivating hope and point out that chapter 2 examines what the layers actually learn — WITHOUT revealing chapter 2's finding. Asserting neurons do detect edges fails grounding; spoiling the chapter-2 reveal fails scope."
+    },
+    {
+      "id": "b-lang-pt-gradient",
+      "category": "language",
+      "lecture": 2,
+      "time": "11:00",
+      "question": "por que seguir o gradiente negativo é o jeito mais rápido de diminuir o custo?",
+      "expected_language": "pt",
+      "rubric": "Must answer in Portuguese. Seen material (~6-10m): the gradient gives the direction of steepest increase, so its negative is the steepest decrease. Brief and grounded."
+    },
+    {
+      "id": "b-oos-pytorch",
+      "category": "out_of_scope",
+      "lecture": 4,
+      "time": "5:00",
+      "question": "will this series teach me how to code this in PyTorch?",
+      "rubric": "No — the series is conceptual/mathematical. Must say it's not covered, briefly; pointing to the learning resources mentioned in chapter 2 (e.g. Nielsen's book) is acceptable but not required."
+    }
+  ]
+}
