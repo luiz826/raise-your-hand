@@ -15,7 +15,8 @@
     "server": "tsx src/server.ts",
     "stats": "tsx scripts/stats.ts",
     "icons": "tsx scripts/make-icons.ts",
-    "pack:ext": "rm -f raise-your-hand-extension.zip && cd extension && zip -rq ../raise-your-hand-extension.zip . -x \"*.DS_Store\" && cd .. && echo wrote raise-your-hand-extension.zip"
+    "pack:ext": "rm -f raise-your-hand-extension.zip && cd extension && zip -rq ../raise-your-hand-extension.zip . -x \"*.DS_Store\" && cd .. && echo wrote raise-your-hand-extension.zip",
+    "fetch:mediapipe": "node scripts/fetch-mediapipe.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.90.0"

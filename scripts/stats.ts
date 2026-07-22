@@ -29,7 +29,13 @@ interface FeedbackEvent {
   answerId: string;
   rating: 1 | -1;
 }
-type Event = AskEvent | FeedbackEvent | { t: string };
+interface HeartbeatEvent {
+  t: "heartbeat";
+  ts: string;
+  device: string | null;
+  seconds: number;
+}
+type Event = AskEvent | FeedbackEvent | HeartbeatEvent | { t: string };
 
 const events: Event[] = fs
   .readFileSync(FILE, "utf8")
@@ -39,6 +45,8 @@ const events: Event[] = fs
 
 const asks = events.filter((e): e is AskEvent => e.t === "ask");
 const feedback = events.filter((e): e is FeedbackEvent => e.t === "feedback");
+const heartbeats = events.filter((e): e is HeartbeatEvent => e.t === "heartbeat");
+const watchMinutes = heartbeats.reduce((s, h) => s + (h.seconds || 0), 0) / 60;
 
 if (asks.length === 0) {
   console.log("no `ask` events yet.");
@@ -76,8 +84,13 @@ console.log(`questions:        ${asks.length}  (${sessions.length} pause session
 console.log(`${bar(followUpRate >= 0.3)} follow-up rate:  ${pct(followUpRate)}  (target ≥30% — sessions with a 2nd+ question)`);
 console.log(`${bar(coverage > 0 && thumbsUpRate >= 0.7)} thumbs-up rate:  ${pct(thumbsUpRate)}  (${up}👍 ${down}👎 — target ≥70%)`);
 console.log(`   feedback coverage: ${pct(coverage)} of answers rated`);
+if (watchMinutes > 0) {
+  const per20 = asks.length / (watchMinutes / 20);
+  console.log(`${bar(per20 >= 1)} engagement:     ${per20.toFixed(1)} questions / 20 min watched  (target ≥1 · ${watchMinutes.toFixed(0)} min watched)`);
+} else {
+  console.log(`   engagement:      no watch-time yet (play a prepared course to log heartbeats)`);
+}
 console.log(`\nby model:`);
 for (const [m, n] of [...models.entries()].sort((a, b) => b[1] - a[1])) {
   console.log(`   ${m}: ${n}`);
 }
-console.log(`\n(questions-per-20-min-watched needs watch-time tracking — not logged yet)`);

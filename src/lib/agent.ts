@@ -43,6 +43,11 @@ const labelled = (q: string): PromptSegment => ({
 
 // The full prompt for a stateless Q&A request: the cached session block rides on
 // the first user turn; prior turns replay as plain text.
+export interface QuestionImage {
+  mediaType: string;
+  base64: string;
+}
+
 export function assembleSegments(
   map: CourseMap,
   lectureIndex: number,
@@ -50,18 +55,35 @@ export function assembleSegments(
   videoSegments: VideoData["segments"],
   priorTurns: PriorTurn[],
   question: string,
+  image?: QuestionImage,
+  answerLanguage?: string,
 ): PromptSegment[] {
   const session = sessionSegment(map, lectureIndex, pauseSeconds, videoSegments);
   const segs: PromptSegment[] = [...systemSegments(map)];
+  // The learner picks a language in the extension; force the answer into it so a
+  // partly-English speech transcription can't drag the reply into English. This
+  // rides AFTER the cacheable course map, so it doesn't disturb the prefix cache.
+  if (answerLanguage) {
+    segs.push({
+      role: "system",
+      text: `RESPOND IN ${answerLanguage}: Write your ENTIRE answer in ${answerLanguage}. This is the student's chosen language and it overrides the default "match the question" rule — do not answer in English or any other language, even if the question looks like it is in another language (their speech was transcribed and may be imperfect).`,
+    });
+  }
 
-  const firstUserTurn = (q: string): PromptSegment[] => [session, labelled(q)];
   priorTurns.forEach((t, i) => {
-    if (i === 0) segs.push(...firstUserTurn(t.question));
+    if (i === 0) segs.push(session, labelled(t.question));
     else segs.push({ role: "user", text: t.question });
     segs.push({ role: "assistant", text: t.answer });
   });
-  if (priorTurns.length === 0) segs.push(...firstUserTurn(question));
-  else segs.push({ role: "user", text: question });
+
+  // Current question; the visual frame (if any) rides on it — not cacheable.
+  const qSeg: PromptSegment = priorTurns.length === 0 ? labelled(question) : { role: "user", text: question };
+  if (image) {
+    qSeg.imageBase64 = image.base64;
+    qSeg.imageMediaType = image.mediaType;
+  }
+  if (priorTurns.length === 0) segs.push(session, qSeg);
+  else segs.push(qSeg);
   return segs;
 }
 

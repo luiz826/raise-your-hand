@@ -34,15 +34,30 @@ function systemBlocks(
 }
 
 function messages(
-  turns: { role: "user" | "assistant"; parts: { text: string; cacheable?: boolean }[] }[],
+  turns: {
+    role: "user" | "assistant";
+    parts: { text: string; cacheable?: boolean; imageBase64?: string; imageMediaType?: string }[];
+  }[],
 ): Anthropic.MessageParam[] {
   return turns.map((turn) => ({
     role: turn.role,
-    content: turn.parts.map((p) => ({
-      type: "text" as const,
-      text: p.text,
-      ...(p.cacheable ? { cache_control: { type: "ephemeral" as const } } : {}),
-    })),
+    content: turn.parts.flatMap((p) => {
+      const blocks: Anthropic.ContentBlockParam[] = [];
+      if (p.imageBase64) {
+        blocks.push({
+          type: "image",
+          source: { type: "base64", media_type: (p.imageMediaType as any) || "image/jpeg", data: p.imageBase64 },
+        });
+      }
+      if (p.text) {
+        blocks.push({
+          type: "text",
+          text: p.text,
+          ...(p.cacheable ? { cache_control: { type: "ephemeral" as const } } : {}),
+        });
+      }
+      return blocks;
+    }),
   }));
 }
 
@@ -57,7 +72,7 @@ function reasoningParams(model: string, reasoning: Reasoning) {
 
 export class AnthropicProvider implements LLMProvider {
   readonly name = "anthropic";
-  private client = new Anthropic();
+  private client = new Anthropic({ timeout: 120_000 }); // don't let a hung request hold the connection
 
   async streamText(req: StreamRequest): Promise<LLMResult> {
     const { system, turns } = partitionSegments(req.segments);

@@ -18,7 +18,7 @@ import {
 
 interface OAIMessage {
   role: "system" | "user" | "assistant";
-  content: string;
+  content: string | unknown[]; // array form carries images (image_url parts)
 }
 
 function toMessages(segments: StreamRequest["segments"]): OAIMessage[] {
@@ -28,7 +28,21 @@ function toMessages(segments: StreamRequest["segments"]): OAIMessage[] {
     out.push({ role: "system", content: system.map((s) => s.text).join("\n\n") });
   }
   for (const t of turns) {
-    out.push({ role: t.role, content: t.parts.map((p) => p.text).join("\n\n") });
+    if (!t.parts.some((p) => p.imageBase64)) {
+      out.push({ role: t.role, content: t.parts.map((p) => p.text).filter(Boolean).join("\n\n") });
+      continue;
+    }
+    const content: unknown[] = [];
+    for (const p of t.parts) {
+      if (p.imageBase64) {
+        content.push({
+          type: "image_url",
+          image_url: { url: `data:${p.imageMediaType || "image/jpeg"};base64,${p.imageBase64}` },
+        });
+      }
+      if (p.text) content.push({ type: "text", text: p.text });
+    }
+    out.push({ role: t.role, content });
   }
   return out;
 }
@@ -58,7 +72,9 @@ export class OpenAICompatProvider implements LLMProvider {
     this.apiKey = key;
   }
 
-  private async post(body: unknown): Promise<Response> {
+  // Signal lets the caller abort a request that hangs (no timeout on fetch = a
+  // stuck upstream would hold the connection forever).
+  private async post(body: unknown, signal?: AbortSignal): Promise<Response> {
     const res = await fetch(this.endpoint, {
       method: "POST",
       headers: {
@@ -66,6 +82,7 @@ export class OpenAICompatProvider implements LLMProvider {
         Authorization: `Bearer ${this.apiKey}`,
       },
       body: JSON.stringify(body),
+      signal,
     });
     if (!res.ok) {
       const detail = await res.text().catch(() => "");
@@ -75,53 +92,80 @@ export class OpenAICompatProvider implements LLMProvider {
   }
 
   async streamText(req: StreamRequest): Promise<LLMResult> {
-    const res = await this.post({
-      model: req.model,
-      max_tokens: req.maxTokens,
-      messages: toMessages(req.segments),
-      stream: true,
-      stream_options: { include_usage: true },
-    });
-    if (!res.body) throw new Error(`${this.name}: no response body`);
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 120_000); // total cap (aborts a hung stream)
+    try {
+      const res = await this.post(
+        {
+          model: req.model,
+          max_tokens: req.maxTokens,
+          messages: toMessages(req.segments),
+          stream: true,
+          stream_options: { include_usage: true },
+        },
+        ctrl.signal,
+      );
+      if (!res.body) throw new Error(`${this.name}: no response body`);
 
-    const reader = res.body.getReader();
-    const dec = new TextDecoder();
-    let buf = "";
-    let text = "";
-    let usage = emptyUsage();
-    for (;;) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      buf += dec.decode(value, { stream: true });
-      const lines = buf.split("\n");
-      buf = lines.pop() || "";
-      for (const line of lines) {
-        const t = line.trim();
-        if (!t.startsWith("data:")) continue;
-        const payload = t.slice(5).trim();
-        if (payload === "[DONE]") continue;
-        const ev = JSON.parse(payload);
-        const delta = ev.choices?.[0]?.delta?.content;
-        if (delta) {
-          text += delta;
-          req.onDelta?.(delta);
+      const reader = res.body.getReader();
+      const dec = new TextDecoder();
+      let buf = "";
+      let text = "";
+      let reasoning = ""; // thinking models (e.g. Kimi K3) may put output here with content empty
+      let usage = emptyUsage();
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        const lines = buf.split("\n");
+        buf = lines.pop() || "";
+        for (const line of lines) {
+          const t = line.trim();
+          if (!t.startsWith("data:")) continue;
+          const payload = t.slice(5).trim();
+          if (payload === "[DONE]") continue;
+          const ev = JSON.parse(payload);
+          const delta = ev.choices?.[0]?.delta;
+          if (delta?.content) {
+            text += delta.content;
+            req.onDelta?.(delta.content);
+          }
+          if (delta?.reasoning_content) reasoning += delta.reasoning_content;
+          if (ev.usage) usage = usageOf(ev.usage);
         }
-        if (ev.usage) usage = usageOf(ev.usage);
       }
+      // Fallback: a reasoning model that emitted only thinking and no content
+      // (else the answer comes back empty — the esc-grpo failure).
+      if (!text.trim() && reasoning.trim()) {
+        text = reasoning;
+        req.onDelta?.(reasoning);
+      }
+      return { text, usage };
+    } finally {
+      clearTimeout(timer);
     }
-    return { text, usage };
   }
 
   async completeStructured(req: StructuredRequest): Promise<LLMResult> {
-    const res = await this.post({
-      model: req.model,
-      max_tokens: req.maxTokens,
-      messages: toMessages(req.segments),
-      response_format: {
-        type: "json_schema",
-        json_schema: { name: req.schemaName, schema: req.schema, strict: true },
-      },
-    });
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 120_000);
+    let res: Response;
+    try {
+      res = await this.post(
+        {
+          model: req.model,
+          max_tokens: req.maxTokens,
+          messages: toMessages(req.segments),
+          response_format: {
+            type: "json_schema",
+            json_schema: { name: req.schemaName, schema: req.schema, strict: true },
+          },
+        },
+        ctrl.signal,
+      );
+    } finally {
+      clearTimeout(timer);
+    }
     const json = await res.json();
     const choice = json.choices?.[0];
     if (choice?.finish_reason === "length") {

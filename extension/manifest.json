@@ -18,12 +18,43 @@
   },
   "content_scripts": [
     {
-      "matches": ["*://www.youtube.com/watch*"],
-      "js": ["content.js"],
-      "css": ["content.css"],
+      "matches": [
+        "*://www.youtube.com/watch*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "css": [
+        "content.css"
+      ],
       "run_at": "document_idle"
     }
   ],
-  "permissions": ["storage"],
-  "host_permissions": ["http://localhost:8787/*"]
+  "background": {
+    "service_worker": "background.js"
+  },
+  "permissions": [
+    "storage",
+    "offscreen"
+  ],
+  "host_permissions": [
+    "http://localhost:8787/*",
+    "http://localhost:8788/*",
+    "http://localhost:8789/*",
+    "*://www.youtube.com/*"
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "vendor/*",
+        "vendor/wasm/*"
+      ],
+      "matches": [
+        "*://www.youtube.com/*"
+      ]
+    }
+  ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
+  }
 }

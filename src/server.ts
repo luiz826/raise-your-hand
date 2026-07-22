@@ -20,15 +20,30 @@ import { acquireIngestSlot, rateLimit, releaseIngestSlot } from "./lib/guard";
 const PORT = Number(process.env.PORT ?? 8787);
 const HOST = process.env.HOST ?? "127.0.0.1"; // bind localhost by default; set 0.0.0.0 to expose
 const ALLOWED_ORIGIN = process.env.RYH_ALLOWED_ORIGIN ?? "*"; // lock to the extension origin on deploy
+const API_TOKEN = process.env.RYH_API_TOKEN ?? ""; // if set, /ask & /ingest require Authorization: Bearer <token>
+const LOG_TEXT = process.env.RYH_LOG_TEXT !== "0"; // set 0 to omit question/answer text from telemetry
 const qaModel = resolveModel(QA_MODEL);
+
+// IDs arrive from the client and end up in filesystem paths, so validate them
+// hard (only YouTube's id charset) — no "/" or ".." → no path traversal.
+const PLAYLIST_RE = /^[A-Za-z0-9_-]{1,64}$/;
+const VIDEO_RE = /^[A-Za-z0-9_-]{1,20}$/;
+const validId = (s: unknown, re: RegExp): s is string => typeof s === "string" && re.test(s);
 
 // Rate limits (per device id, falling back to IP).
 const ASK_PER_MIN = Number(process.env.RYH_ASK_PER_MIN ?? 30);
 const INGEST_PER_HOUR = Number(process.env.RYH_INGEST_PER_HOUR ?? 5);
 const MAX_CONCURRENT_INGESTS = Number(process.env.RYH_MAX_INGESTS ?? 2);
 
-function clientKey(req: http.IncomingMessage, body: { deviceId?: string }): string {
-  return body?.deviceId || req.socket.remoteAddress || "unknown";
+// Rate-limit by source IP — not the client-supplied deviceId (which can be
+// rotated to bypass limits). Behind a proxy, trust X-Forwarded-For instead.
+function clientKey(req: http.IncomingMessage): string {
+  return req.socket.remoteAddress || "unknown";
+}
+
+function checkToken(req: http.IncomingMessage): boolean {
+  if (!API_TOKEN) return true; // auth disabled (local/dev)
+  return req.headers["authorization"] === `Bearer ${API_TOKEN}`;
 }
 
 interface LoadedCourse {
@@ -81,7 +96,7 @@ async function readBody(req: http.IncomingMessage, maxBytes = 1_000_000): Promis
 // GET /course?playlistId=... — course metadata + videoId→lecture map so the
 // extension can show readiness and resolve the current video.
 function handleCourse(res: http.ServerResponse, playlistId: string) {
-  if (!playlistId) return sendJson(res, 400, { error: "playlistId required" });
+  if (!validId(playlistId, PLAYLIST_RE)) return sendJson(res, 400, { error: "valid playlistId required" });
   const course = loadCourse(playlistId);
   if (!course) return sendJson(res, 200, { ingested: false, playlistId });
   sendJson(res, 200, {
@@ -106,6 +121,8 @@ interface AskBody {
   deviceId?: string;
   sessionId?: string; // a "pause session"; resets on seek/navigation in the extension
   turnIndex?: number; // 0 = first question in a pause session; >0 = follow-up
+  image?: { mediaType?: string; base64?: string }; // captured video frame for a visual question
+  answerLanguage?: string; // the learner's chosen language (e.g. "Brazilian Portuguese") — force the reply into it
 }
 
 // POST /ask — streams NDJSON: {type:"meta"|"delta"|"done"|"error", ...}
@@ -124,8 +141,8 @@ async function handleAsk(res: http.ServerResponse, body: AskBody, key: string) {
       return res.end();
     }
     const { playlistId, videoId, question } = body;
-    if (!playlistId || !videoId || !question?.trim()) {
-      emit({ type: "error", message: "playlistId, videoId and question required" });
+    if (!validId(playlistId, PLAYLIST_RE) || !validId(videoId, VIDEO_RE) || !question?.trim()) {
+      emit({ type: "error", message: "valid playlistId, videoId and question required" });
       return res.end();
     }
     const course = loadCourse(playlistId);
@@ -154,6 +171,16 @@ async function handleAsk(res: http.ServerResponse, body: AskBody, key: string) {
       pauseTime: formatTime(pauseSeconds),
     });
 
+    const image =
+      body.image?.base64 && body.image.base64.length > 0
+        ? { mediaType: body.image.mediaType || "image/jpeg", base64: body.image.base64 }
+        : undefined;
+    // Sanitize the client-supplied language before it enters the system prompt
+    // (strip newlines + cap length so it can't inject prompt instructions).
+    const answerLanguage =
+      typeof body.answerLanguage === "string"
+        ? body.answerLanguage.replace(/[\r\n]+/g, " ").slice(0, 40)
+        : undefined;
     const segments = assembleSegments(
       course.map,
       lecture.index,
@@ -161,6 +188,8 @@ async function handleAsk(res: http.ServerResponse, body: AskBody, key: string) {
       video.segments,
       (body.history ?? []).slice(-6), // cap replayed context
       question.trim(),
+      image,
+      answerLanguage,
     );
 
     const { text: answer, usage } = await runQA(qaModel, segments, (t) =>
@@ -177,8 +206,9 @@ async function handleAsk(res: http.ServerResponse, body: AskBody, key: string) {
       pauseSeconds,
       turnIndex: body.turnIndex ?? 0,
       model: qaModel.spec,
-      question: question.trim(),
-      answer,
+      ...(LOG_TEXT
+        ? { question: question.trim(), answer }
+        : { questionLen: question.trim().length, answerLen: answer.length }),
       usage,
     });
     emit({ type: "done", answerId, usage });
@@ -213,8 +243,8 @@ async function handleIngest(res: http.ServerResponse, body: IngestBody, key: str
 
   try {
     const { playlistId, title, videos } = body;
-    if (!playlistId || !Array.isArray(videos) || videos.length === 0) {
-      emit({ type: "error", message: "playlistId and videos required" });
+    if (!validId(playlistId, PLAYLIST_RE) || !Array.isArray(videos) || videos.length === 0) {
+      emit({ type: "error", message: "valid playlistId and videos required" });
       return res.end();
     }
     if (loadCourse(playlistId)) {
@@ -235,7 +265,7 @@ async function handleIngest(res: http.ServerResponse, body: IngestBody, key: str
     }
     gotSlot = true;
     const valid = videos.filter(
-      (v) => v && v.videoId && Array.isArray(v.segments) && v.segments.length > 0,
+      (v) => v && validId(v.videoId, VIDEO_RE) && Array.isArray(v.segments) && v.segments.length > 0,
     );
     if (valid.length === 0) {
       emit({ type: "error", message: "no usable transcripts uploaded" });
@@ -290,16 +320,33 @@ const server = http.createServer(async (req, res) => {
       return handleCourse(res, url.searchParams.get("playlistId") ?? "");
     }
     if (req.method === "POST" && url.pathname === "/ask") {
-      const body = await readBody(req, 256_000);
-      return handleAsk(res, body, clientKey(req, body));
+      if (!checkToken(req)) return sendJson(res, 401, { error: "unauthorized" });
+      const body = await readBody(req, 4_000_000); // room for a captured frame
+      return handleAsk(res, body, clientKey(req));
     }
     if (req.method === "POST" && url.pathname === "/ingest") {
+      if (!checkToken(req)) return sendJson(res, 401, { error: "unauthorized" });
       const body = await readBody(req, 32_000_000); // up to 40 transcripts
-      return handleIngest(res, body, clientKey(req, body));
+      return handleIngest(res, body, clientKey(req));
+    }
+    if (req.method === "POST" && url.pathname === "/heartbeat") {
+      const b = await readBody(req, 16_000);
+      // One heartbeat per HEARTBEAT_SECONDS of playback; drop floods.
+      if (rateLimit(`hb:${clientKey(req)}`, 6, 60_000)) {
+        logEvent({
+          t: "heartbeat",
+          device: b.deviceId ?? null,
+          playlistId: b.playlistId ?? null,
+          videoId: b.videoId ?? null,
+          second: Math.max(0, Math.floor(b.currentTimeSeconds ?? 0)),
+          seconds: Number(b.seconds) || 0, // playback seconds this heartbeat covers
+        });
+      }
+      return sendJson(res, 200, { ok: true });
     }
     if (req.method === "POST" && url.pathname === "/feedback") {
       const b = await readBody(req, 16_000);
-      if (!rateLimit(`fb:${clientKey(req, b)}`, 120, 60_000)) {
+      if (!rateLimit(`fb:${clientKey(req)}`, 120, 60_000)) {
         return sendJson(res, 429, { error: "rate limited" });
       }
       const rating = b.rating === 1 || b.rating === "up" ? 1 : b.rating === -1 || b.rating === "down" ? -1 : 0;

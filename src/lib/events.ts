@@ -11,20 +11,17 @@ import path from "node:path";
 import crypto from "node:crypto";
 
 const EVENTS_FILE = path.join("data", "events.jsonl");
+try { fs.mkdirSync("data", { recursive: true }); } catch { /* created lazily below too */ }
 
 export function newId(prefix: string): string {
   return `${prefix}_${crypto.randomBytes(8).toString("hex")}`;
 }
 
 export function logEvent(event: Record<string, unknown>): void {
-  try {
-    fs.mkdirSync("data", { recursive: true });
-    fs.appendFileSync(
-      EVENTS_FILE,
-      JSON.stringify({ ts: new Date().toISOString(), ...event }) + "\n",
-    );
-  } catch (err) {
-    // Telemetry must never break a request.
-    console.error("event log failed:", (err as Error).message);
-  }
+  // Async append so telemetry never blocks the request/event loop. Telemetry
+  // must never break a request, so errors are swallowed with a log.
+  const line = JSON.stringify({ ts: new Date().toISOString(), ...event }) + "\n";
+  fs.appendFile(EVENTS_FILE, line, (err) => {
+    if (err) console.error("event log failed:", err.message);
+  });
 }

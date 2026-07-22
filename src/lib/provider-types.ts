@@ -9,6 +9,9 @@ export interface PromptSegment {
   role: "system" | "user" | "assistant";
   text: string;
   cacheable?: boolean;
+  // Optional image on a user segment (visual questions — a captured video frame).
+  imageBase64?: string;
+  imageMediaType?: string; // e.g. "image/jpeg"
 }
 
 // Neutral reasoning hint. Providers map it to their own knobs (or ignore it):
