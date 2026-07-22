@@ -1,10 +1,9 @@
-/* Host element only — all real UI lives in a shadow root to avoid YouTube's
-   CSS bleeding in (and vice versa). */
+/* Host for the ambient overlay — a full-viewport, click-through positioning
+   context. The real UI lives in a shadow root (styles isolated from YouTube);
+   the overlay layer sets pointer-events on its own interactive parts. */
 #ryh-root {
   position: fixed;
+  inset: 0;
   z-index: 2147483000;
-  top: 0;
-  left: 0;
-  width: 0;
-  height: 0;
+  pointer-events: none;
 }
