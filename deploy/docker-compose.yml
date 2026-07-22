@@ -1,0 +1,64 @@
+# Single-VPS deployment: Node backend + Kokoro TTS + Whisper STT behind Caddy
+# (automatic HTTPS). One command: `docker compose --env-file deploy/.env -f deploy/docker-compose.yml up -d --build`
+# Run from the repo root. Fill in deploy/.env first (see deploy/.env.example).
+
+services:
+  backend:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.backend
+    env_file: [.env]
+    environment:
+      HOST: "0.0.0.0"
+      PORT: "8787"
+    volumes:
+      - ../data:/app/data          # pre-ingested course maps live here
+    expose: ["8787"]
+    restart: unless-stopped
+
+  tts:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.voice
+    command: ["python", "tts/server.py"]
+    env_file: [.env]
+    environment:
+      RYH_TTS_PORT: "8788"
+    volumes:
+      - voice-models:/app/tts/models
+      - hf-cache:/root/.cache/huggingface
+    expose: ["8788"]
+    restart: unless-stopped
+
+  stt:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.voice
+    command: ["python", "stt/server.py"]
+    env_file: [.env]
+    environment:
+      RYH_STT_PORT: "8789"
+    volumes:
+      - voice-models:/app/tts/models
+      - hf-cache:/root/.cache/huggingface
+    expose: ["8789"]
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2
+    env_file: [.env]                 # provides RYH_DOMAIN for the Caddyfile
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on: [backend, tts, stt]
+    restart: unless-stopped
+
+volumes:
+  voice-models:
+  hf-cache:
+  caddy-data:
+  caddy-config:

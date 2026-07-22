@@ -1,0 +1,16 @@
+# One domain, path-routed. Caddy fetches + renews a TLS cert automatically.
+# /tts and /stt go to the voice servers; everything else (/ask, /course,
+# /ingest, /feedback, /heartbeat, /health) goes to the backend.
+{$RYH_DOMAIN} {
+	encode zstd gzip
+
+	handle /tts* {
+		reverse_proxy tts:8788
+	}
+	handle /stt* {
+		reverse_proxy stt:8789
+	}
+	handle {
+		reverse_proxy backend:8787
+	}
+}

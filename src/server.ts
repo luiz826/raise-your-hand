@@ -20,7 +20,7 @@ import { acquireIngestSlot, rateLimit, releaseIngestSlot } from "./lib/guard";
 const PORT = Number(process.env.PORT ?? 8787);
 const HOST = process.env.HOST ?? "127.0.0.1"; // bind localhost by default; set 0.0.0.0 to expose
 const ALLOWED_ORIGIN = process.env.RYH_ALLOWED_ORIGIN ?? "*"; // lock to the extension origin on deploy
-const API_TOKEN = process.env.RYH_API_TOKEN ?? ""; // if set, /ask & /ingest require Authorization: Bearer <token>
+const API_TOKEN = process.env.RYH_API_TOKEN ?? ""; // if set, /ingest requires Authorization: Bearer <token>
 const LOG_TEXT = process.env.RYH_LOG_TEXT !== "0"; // set 0 to omit question/answer text from telemetry
 const qaModel = resolveModel(QA_MODEL);
 
@@ -320,11 +320,13 @@ const server = http.createServer(async (req, res) => {
       return handleCourse(res, url.searchParams.get("playlistId") ?? "");
     }
     if (req.method === "POST" && url.pathname === "/ask") {
-      if (!checkToken(req)) return sendJson(res, 401, { error: "unauthorized" });
+      // Public endpoint (the extension calls it) — protected by rate limits + CORS, not a token.
       const body = await readBody(req, 4_000_000); // room for a captured frame
       return handleAsk(res, body, clientKey(req));
     }
     if (req.method === "POST" && url.pathname === "/ingest") {
+      // Expensive (builds a course map via the LLM) — gate it behind RYH_API_TOKEN
+      // so only the maintainer can pre-ingest courses; end users use what's ready.
       if (!checkToken(req)) return sendJson(res, 401, { error: "unauthorized" });
       const body = await readBody(req, 32_000_000); // up to 40 transcripts
       return handleIngest(res, body, clientKey(req));

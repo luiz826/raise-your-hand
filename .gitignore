@@ -13,3 +13,6 @@ tts/models/
 
 # uv / Python venv
 .venv/
+
+# deploy secrets
+deploy/.env

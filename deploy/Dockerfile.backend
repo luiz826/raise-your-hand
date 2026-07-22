@@ -1,0 +1,15 @@
+# Node Q&A backend (src/server.ts). Course maps are mounted at /app/data.
+FROM node:22-slim
+WORKDIR /app
+
+COPY package.json package-lock.json* ./
+RUN npm ci
+
+COPY tsconfig.json ./
+COPY src ./src
+COPY scripts ./scripts
+
+ENV NODE_ENV=production
+EXPOSE 8787
+# HOST=0.0.0.0 so Caddy can reach it; keys/model come from the env file.
+CMD ["npx", "tsx", "src/server.ts"]

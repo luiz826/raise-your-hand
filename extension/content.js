@@ -8,11 +8,14 @@
   if (window.__ryhInjected) return;
   window.__ryhInjected = true;
 
-  // DEPLOY: point these at the hosted backend + add the origins to
-  // host_permissions in manifest.json (see SHIP.md).
-  const BACKEND = "http://localhost:8787";
-  const TTS_BACKEND = "http://localhost:8788"; // local Kokoro neural-TTS server (tts/server.py)
-  const STT_BACKEND = "http://localhost:8789"; // local Whisper speech-to-text server (stt/server.py)
+  // DEPLOY: set to your hosted https domain, e.g. "https://voice.yourdomain.com".
+  // All three share it — Caddy path-routes /tts and /stt to the voice servers.
+  // Leave "" for local dev (the three localhost ports below). Also add the domain
+  // to host_permissions in manifest.json.
+  const DEPLOY_HOST = "";
+  const BACKEND = DEPLOY_HOST || "http://localhost:8787";
+  const TTS_BACKEND = DEPLOY_HOST || "http://localhost:8788"; // Kokoro neural-TTS
+  const STT_BACKEND = DEPLOY_HOST || "http://localhost:8789"; // Whisper speech-to-text
   // Voice language: drives STT (rec.lang), the Kokoro voice + lang for the spoken
   // answer, the forced answer language, and the follow-up prompt/"no" detection.
   const LANGS = [
