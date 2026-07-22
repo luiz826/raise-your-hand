@@ -1,0 +1,317 @@
+<title>Raise Your Hand — ambient UI (live)</title>
+<style>
+  :root{
+    --ground:#0b0d11;--video-1:#171c24;--video-2:#0e1218;--chalk:#f1ece2;--chalk-dim:#b9b3a7;
+    --muted:#7f7a70;--line:#242a33;--amber:#e6a94d;--amber-ink:#f2c579;--chalk-blue:#8fb2d4;
+    --serif:'Charter','Iowan Old Style','Palatino Linotype',Georgia,serif;
+    --sans:ui-sans-serif,-apple-system,'Segoe UI',Roboto,'Helvetica Neue',sans-serif;
+    --mono:ui-monospace,'SF Mono',Menlo,monospace;
+  }
+  *{box-sizing:border-box;margin:0}
+  body{background:radial-gradient(1200px 700px at 50% -10%,#12161d 0%,var(--ground) 60%);
+    color:var(--chalk);font-family:var(--sans);min-height:100vh;display:flex;flex-direction:column;
+    align-items:center;padding:clamp(18px,3.4vw,44px) 18px 60px;gap:22px;line-height:1.5}
+  .wrap{width:100%;max-width:1000px;display:flex;flex-direction:column;gap:20px}
+  header{display:flex;flex-direction:column;gap:8px}
+  .eyebrow{font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:var(--amber);font-weight:600;display:flex;gap:9px;align-items:center}
+  .eyebrow::before{content:"✋"}
+  h1{font-family:var(--serif);font-weight:600;font-size:clamp(22px,3.2vw,32px);letter-spacing:-.01em;text-wrap:balance;line-height:1.12}
+  h1 em{font-style:italic;color:var(--amber-ink)}
+  .lede{color:var(--chalk-dim);max-width:64ch;font-size:14.5px}
+
+  /* host for the ambient View (the video sits behind it) */
+  .stage{position:relative;aspect-ratio:16/9;width:100%;border-radius:16px;overflow:hidden;
+    border:1px solid var(--line);box-shadow:0 30px 80px -40px #000,inset 0 1px 0 #ffffff0d;background:#000}
+  .slide{position:absolute;inset:0;display:flex;flex-direction:column;justify-content:center;align-items:center;
+    gap:16px;padding:6% 8%;text-align:center;background:linear-gradient(160deg,var(--video-1),var(--video-2))}
+  .slide.bright{background:linear-gradient(160deg,#f4f1ea,#e7e2d6);color:#20242c}
+  .slide .kicker{font-size:clamp(11px,1.4vw,13px);letter-spacing:.14em;text-transform:uppercase;color:var(--amber);font-weight:600}
+  .slide.bright .kicker{color:#a8792a}
+  .slide .title{font-family:var(--serif);font-size:clamp(20px,3.4vw,32px);letter-spacing:-.01em}
+  .slide .eq{font-family:var(--mono);font-size:clamp(12px,1.8vw,16px);color:var(--chalk-blue);background:#0c1016aa;
+    border:1px solid #ffffff10;border-radius:10px;padding:11px 15px}
+  .slide.bright .eq{color:#365a86;background:#ffffffcc;border-color:#00000012}
+  .slide .sub{font-size:clamp(11px,1.4vw,13px);color:var(--muted);max-width:46ch}
+  .slide.bright .sub{color:#5a5346}
+  #host{position:absolute;inset:0}
+
+  .controls{display:flex;flex-wrap:wrap;gap:14px;align-items:center;justify-content:space-between}
+  .left{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  .play{font:inherit;font-size:13px;font-weight:600;color:#1a130a;background:var(--amber);border:none;padding:10px 17px;
+    border-radius:10px;cursor:pointer;display:flex;gap:8px;align-items:center;box-shadow:0 8px 22px -10px #e6a94d80}
+  .play:hover{filter:brightness(1.06)}
+  .ghost{font:inherit;font-size:13px;color:var(--chalk-dim);background:#10141a;border:1px solid var(--line);
+    padding:9px 13px;border-radius:9px;cursor:pointer}
+  .ghost:hover{color:var(--chalk);border-color:#33404e}
+  .hint{color:var(--muted);font-size:13px}
+  .foot{color:var(--muted);font-size:12.5px;max-width:74ch;border-top:1px solid var(--line);padding-top:16px}
+  .foot code{font-family:var(--mono);color:var(--chalk-dim)}
+  @media (prefers-reduced-motion:reduce){*{animation:none!important;transition-duration:.001ms!important}}
+</style>
+
+<div class="wrap">
+  <header>
+    <div class="eyebrow">Ambient UI · live component</div>
+    <h1>The real overlay — <em>raise your hand</em>, speak, hear the answer.</h1>
+    <p class="lede">This is the actual <code style="font-family:var(--mono);font-size:.9em">View</code> component that ships in the extension, driven here over a mock lecture. Press play, or drive it yourself. The control dock (bottom-right of the frame) is the only persistent chrome — move your mouse over the frame to reveal it.</p>
+  </header>
+
+  <div class="stage" id="stage">
+    <div class="slide" id="slide">
+      <div class="kicker">CME295 · Lecture 5 — LLM tuning</div>
+      <div class="title">Variation 1: PPO-Clip</div>
+      <div class="eq">L = 𝔼[ min( r·Â, clip(r, 1−ε, 1+ε)·Â ) ]</div>
+      <div class="sub">Clip the ratio between the new and old policy to keep each update small.</div>
+    </div>
+    <div id="host"></div>
+  </div>
+
+  <div class="controls">
+    <div class="left">
+      <button class="play" id="play">▶ Play the moment</button>
+      <button class="ghost" data-s="listening">Listening</button>
+      <button class="ghost" data-s="answer">Answer</button>
+      <button class="ghost" data-s="followup">Again?</button>
+      <button class="ghost" id="idle">Reset</button>
+    </div>
+    <div class="left">
+      <button class="ghost" id="bright">Toggle bright slide</button>
+      <span class="hint" id="hint">tip: hover the frame for the dock</span>
+    </div>
+  </div>
+
+  <p class="foot">Single dark theme by design (it's over a playing lecture). One amber accent, a warm serif for the spoken answer. <code>createView(host, handlers)</code> here is byte-for-byte what gets ported into <code>content.js</code> — the harness just feeds it scripted data instead of the live voice loop.</p>
+</div>
+
+<script>
+// ============================================================================
+//  createView(host, handlers) — the ambient overlay component.
+//  Ported verbatim into content.js; there `host` is a fixed full-viewport
+//  element and handlers wire to the real gesture/STT/TTS/ask loop.
+//  API: setState, setTranscript, appendAnswer, finishAnswer, showError,
+//       setHandRaise, setLang, setListeningUI, mountLangs.
+// ============================================================================
+function createView(host, handlers = {}) {
+  const root = host.attachShadow({ mode: "open" });
+  root.innerHTML = `
+    <style>
+      :host{ all: initial; }
+      *{ box-sizing:border-box; font-family:var(--sans,ui-sans-serif,-apple-system,'Segoe UI',sans-serif); }
+      .layer{ position:absolute; inset:0; overflow:hidden; --amber:#e6a94d; --amber-ink:#f2c579; --chalk:#f1ece2;
+        --serif:'Charter','Iowan Old Style','Palatino Linotype',Georgia,serif; --mono:ui-monospace,'SF Mono',Menlo,monospace; }
+      .scrim{ position:absolute; inset:0; pointer-events:none; opacity:0; transition:opacity .5s ease;
+        background:radial-gradient(120% 120% at 50% 42%,#0000 30%,#000000cc 100%); }
+      .lower{ position:absolute; inset:0; pointer-events:none; opacity:0; transition:opacity .5s ease;
+        background:linear-gradient(to top,#000000dd 12%,#0000 46%); }
+      .el{ position:absolute; opacity:0; transition:opacity .45s ease, transform .45s ease; }
+
+      .cue{ left:50%; bottom:18px; transform:translate(-50%,8px); display:flex; align-items:center; gap:9px;
+        font-size:13px; color:#efe9de; background:#0c0f14b3; border:1px solid #ffffff14; backdrop-filter:blur(6px);
+        padding:8px 14px; border-radius:999px; box-shadow:0 8px 24px -12px #000; }
+      .cue .key{ font-family:var(--mono); font-size:11px; color:#8a857b; border:1px solid #ffffff1f; border-radius:5px; padding:1px 6px; }
+
+      .listen{ left:50%; top:44%; transform:translate(-50%,-50%) scale(.96); display:flex; flex-direction:column; align-items:center; gap:16px; }
+      .ring{ width:88px; height:88px; border-radius:50%; position:relative; display:grid; place-items:center; }
+      .ring::after{ content:""; position:absolute; inset:0; border-radius:50%; border:1.5px solid var(--amber); opacity:.5; animation:breathe 2.6s ease-in-out infinite; }
+      .ring .dot{ width:13px; height:13px; border-radius:50%; background:var(--amber); box-shadow:0 0 26px 6px #e6a94d66; }
+      .wave{ display:flex; gap:4px; height:20px; align-items:center; }
+      .wave i{ width:3px; height:8px; background:var(--amber); border-radius:2px; animation:eq 1s ease-in-out infinite; }
+      .wave i:nth-child(2){animation-delay:.12s} .wave i:nth-child(3){animation-delay:.24s}
+      .wave i:nth-child(4){animation-delay:.36s} .wave i:nth-child(5){animation-delay:.48s} .wave i:nth-child(6){animation-delay:.6s}
+      .said{ font-family:var(--serif); font-style:italic; font-size:clamp(15px,2vw,19px); color:#efe9de; text-align:center; max-width:32ch; min-height:1.4em; text-wrap:balance; text-shadow:0 1px 10px rgba(0,0,0,.6); }
+      .lbl{ font-size:12px; letter-spacing:.14em; text-transform:uppercase; color:var(--amber); font-weight:600; }
+
+      .answer{ left:0; right:0; bottom:0; padding:clamp(18px,4vw,40px) clamp(20px,6vw,72px) clamp(20px,4vw,40px); display:flex; flex-direction:column; gap:11px; transform:translateY(10px);
+        background:linear-gradient(to top, rgba(8,10,13,.96) 0%, rgba(8,10,13,.9) 58%, rgba(8,10,13,.62) 86%, rgba(8,10,13,0) 100%); backdrop-filter:blur(4px); }
+      .answer .who{ display:flex; align-items:center; gap:9px; font-size:11px; letter-spacing:.14em; text-transform:uppercase; color:var(--amber); font-weight:600; }
+      .answer .who .spk{ display:inline-flex; gap:2px; align-items:flex-end; height:11px; }
+      .answer .who .spk i{ width:2.5px; height:5px; background:var(--amber); border-radius:1px; animation:eq .9s ease-in-out infinite; }
+      .answer .who .spk i:nth-child(2){animation-delay:.15s} .answer .who .spk i:nth-child(3){animation-delay:.3s}
+      .answer p{ font-family:var(--serif); font-size:clamp(17px,2.4vw,24px); line-height:1.42; color:#f6f1e8; max-width:40ch; text-wrap:pretty; letter-spacing:-.005em; text-shadow:0 1px 10px rgba(0,0,0,.55);
+        max-height:34vh; overflow-y:auto; scrollbar-width:none; }
+      .answer p::-webkit-scrollbar{ display:none; }
+      .answer .ts{ color:var(--amber-ink); text-decoration:underline; text-underline-offset:3px; text-decoration-thickness:1px; cursor:pointer; pointer-events:auto; }
+      .answer .foot{ display:flex; align-items:center; gap:14px; }
+      .answer .meta{ font-size:12px; color:#8a857b; font-variant-numeric:tabular-nums; }
+      .fb{ display:flex; gap:6px; opacity:0; transition:opacity .4s ease .3s; pointer-events:auto; }
+      .fb button{ background:none; border:none; cursor:pointer; font-size:14px; opacity:.55; transition:opacity .2s, transform .1s; padding:2px; }
+      .fb button:hover{ opacity:1; } .fb button:active{ transform:scale(.9); } .fb .picked{ opacity:1; }
+      .answer.done .fb{ opacity:1; }
+
+      .followup{ left:50%; bottom:22px; transform:translate(-50%,8px); font-family:var(--serif); font-size:clamp(15px,2.1vw,20px); color:#efe9de; display:flex; gap:11px; align-items:center;
+        background:#0c0f14cc; border:1px solid #ffffff1c; backdrop-filter:blur(6px); padding:9px 18px; border-radius:999px; box-shadow:0 10px 28px -14px #000; text-shadow:0 1px 8px rgba(0,0,0,.5); }
+      .followup .mini{ display:inline-flex; gap:3px; } .followup .mini i{ width:3px; height:9px; background:var(--amber); border-radius:2px; animation:eq 1s ease-in-out infinite; }
+      .followup .mini i:nth-child(2){animation-delay:.15s} .followup .mini i:nth-child(3){animation-delay:.3s}
+
+      .err{ left:50%; bottom:70px; transform:translate(-50%,6px); font-size:13px; color:#f0b6a0; background:#2a1512c9; border:1px solid #a5432f66; padding:8px 14px; border-radius:10px; }
+
+      /* control dock — auto-hiding */
+      .dock{ position:absolute; right:16px; bottom:14px; display:flex; align-items:center; gap:8px; pointer-events:auto;
+        opacity:0; transform:translateY(6px); transition:opacity .3s ease, transform .3s ease; }
+      .layer.hot .dock, .layer[data-state="idle"] .dock{ opacity:1; transform:none; }
+      .dock button, .dock select{ font-family:var(--sans,sans-serif); font-size:13px; color:#efe9de; background:#0c0f14cc; border:1px solid #ffffff1f;
+        border-radius:9px; padding:8px 12px; cursor:pointer; backdrop-filter:blur(6px); }
+      .dock button:hover, .dock select:hover{ border-color:var(--amber); }
+      .dock .start{ font-weight:600; display:flex; align-items:center; gap:7px; }
+      .dock .start.on{ background:#b622241a; border-color:#b62324; color:#ffb3ae; }
+      .dock select{ font-weight:600; -webkit-appearance:none; appearance:none; padding-right:12px; }
+      .dock .icon{ padding:8px 10px; font-size:14px; }
+      .typeline{ position:absolute; left:50%; bottom:16px; transform:translate(-50%,10px); width:min(560px,84%); opacity:0;
+        pointer-events:none; transition:opacity .3s ease, transform .3s ease; }
+      .layer.typing .typeline{ opacity:1; transform:translate(-50%,0); pointer-events:auto; }
+      .typeline input{ width:100%; font-family:var(--serif); font-size:16px; color:#f6f1e8; background:#0c0f14e6; border:1px solid #ffffff26;
+        border-radius:12px; padding:13px 16px; outline:none; }
+      .typeline input:focus{ border-color:var(--amber); }
+
+      /* state visibility */
+      .layer[data-state="idle"] .cue{ opacity:1; transform:translate(-50%,0); }
+      .layer[data-state="listening"] .scrim, .layer[data-state="thinking"] .scrim{ opacity:1; }
+      .layer[data-state="answer"] .lower, .layer[data-state="followup"] .lower{ opacity:1; }
+      .layer[data-state="listening"] .listen, .layer[data-state="thinking"] .listen{ opacity:1; transform:translate(-50%,-50%) scale(1); }
+      .layer[data-state="answer"] .answer{ opacity:1; transform:translateY(0); }
+      .layer[data-state="followup"] .followup{ opacity:1; transform:translate(-50%,0); }
+      .layer.err .err{ opacity:1; transform:translate(-50%,0); }
+
+      @keyframes breathe{ 0%,100%{ transform:scale(1); opacity:.5 } 50%{ transform:scale(1.34); opacity:0 } }
+      @keyframes eq{ 0%,100%{ height:6px; opacity:.6 } 50%{ height:18px; opacity:1 } }
+      :focus-visible{ outline:2px solid var(--amber); outline-offset:2px; }
+    </style>
+    <div class="layer" data-state="idle">
+      <div class="scrim"></div><div class="lower"></div>
+      <div class="el cue">✋ Raise your hand to ask <span class="key">⇧A</span></div>
+      <div class="el listen">
+        <div class="lbl">Listening</div>
+        <div class="ring"><span class="dot"></span></div>
+        <div class="wave"><i></i><i></i><i></i><i></i><i></i><i></i></div>
+        <div class="said"></div>
+      </div>
+      <div class="el answer">
+        <div class="who"><span class="spk"><i></i><i></i><i></i></span> Teaching assistant</div>
+        <p class="text"></p>
+        <div class="foot">
+          <span class="meta"></span>
+          <span class="fb"><button data-r="1" title="Helpful">👍</button><button data-r="-1" title="Not helpful">👎</button></span>
+        </div>
+      </div>
+      <div class="el followup"></div>
+      <div class="el err"></div>
+      <div class="typeline"><input placeholder="Type your question…" aria-label="Type your question"></div>
+      <div class="dock">
+        <select class="lang" aria-label="Language"></select>
+        <button class="icon mic" title="Tap to talk">🎤</button>
+        <button class="icon type" title="Type instead">⌨</button>
+        <button class="start" title="Hands-free"><span>✋</span> Raise Your Hand</button>
+      </div>
+    </div>`;
+
+  const layer = root.querySelector(".layer");
+  const q = (s) => root.querySelector(s);
+  const said = q(".said"), answerEl = q(".answer"), textEl = q(".text"), metaEl = q(".meta"),
+        fbEl = q(".fb"), followEl = q(".followup"), errEl = q(".err"), startBtn = q(".start"),
+        langSel = q(".lang"), typeInput = q(".typeline input");
+  let answerId = null, errTimer = null;
+
+  // reveal the dock on activity
+  host.addEventListener("mousemove", () => { layer.classList.add("hot"); clearTimeout(host._t); host._t = setTimeout(() => layer.classList.remove("hot"), 2200); });
+
+  // dock wiring
+  startBtn.onclick = () => handlers.onToggleHandRaise?.();
+  q(".mic").onclick = () => handlers.onTapToTalk?.();
+  q(".type").onclick = () => { layer.classList.toggle("typing"); if (layer.classList.contains("typing")) typeInput.focus(); };
+  langSel.onchange = () => handlers.onLang?.(langSel.value);
+  typeInput.addEventListener("keydown", (e) => { if (e.key === "Enter" && typeInput.value.trim()) { handlers.onType?.(typeInput.value.trim()); typeInput.value = ""; layer.classList.remove("typing"); } });
+  fbEl.querySelectorAll("button").forEach((b) => b.onclick = () => {
+    if (fbEl.dataset.done) return; fbEl.dataset.done = "1"; b.classList.add("picked");
+    handlers.onFeedback?.(Number(b.dataset.r), answerId);
+  });
+
+  const TS = /\b(\d{1,2}:\d{2}(?::\d{2})?)\b/g;
+
+  return {
+    el: layer,
+    mountLangs(langs, current) {
+      langSel.innerHTML = langs.map((l) => `<option value="${l.code}">${l.label}</option>`).join("");
+      langSel.value = current;
+    },
+    setState(s) { layer.classList.remove("err"); layer.dataset.state = s; if (s === "idle") layer.classList.remove("typing"); },
+    setTranscript(t) { said.textContent = t ? "“" + t + "”" : ""; },
+    beginAnswer() { textEl.textContent = ""; metaEl.textContent = ""; answerEl.classList.remove("done"); fbEl.dataset.done = ""; fbEl.querySelectorAll(".picked").forEach(b=>b.classList.remove("picked")); layer.dataset.state = "answer"; },
+    appendAnswer(delta) { if (layer.dataset.state !== "answer") this.beginAnswer(); textEl.textContent += delta; textEl.scrollTop = textEl.scrollHeight; },
+    finishAnswer({ id, meta } = {}) {
+      answerId = id || null;
+      const raw = textEl.textContent; textEl.innerHTML = "";
+      let last = 0, m; TS.lastIndex = 0;
+      while ((m = TS.exec(raw))) {
+        if (m.index > last) textEl.append(raw.slice(last, m.index));
+        const a = document.createElement("span"); a.className = "ts"; a.textContent = m[1];
+        a.onclick = () => handlers.onSeek?.(m[1].split(":").map(Number).reduce((x, n) => x * 60 + n, 0));
+        textEl.append(a); last = m.index + m[1].length;
+      }
+      if (last < raw.length) textEl.append(raw.slice(last));
+      if (meta) metaEl.textContent = meta;
+      answerEl.classList.add("done");
+    },
+    showFollowup(text) { followEl.innerHTML = `${text} <span class="mini"><i></i><i></i><i></i></span>`; layer.dataset.state = "followup"; },
+    showError(msg) { errEl.textContent = msg; layer.classList.add("err"); clearTimeout(errTimer); errTimer = setTimeout(() => layer.classList.remove("err"), 5000); },
+    setHandRaise(on) { startBtn.classList.toggle("on", on); startBtn.querySelector("span").textContent = on ? "◼" : "✋"; startBtn.lastChild.textContent = on ? " Stop" : " Raise Your Hand"; },
+    setLang(code) { langSel.value = code; },
+    setListeningUI() {},
+  };
+}
+
+// ============================================================================
+//  Harness driver — feeds the View scripted data (stands in for the live loop)
+// ============================================================================
+const host = document.getElementById("host");
+const slide = document.getElementById("slide");
+const hint = document.getElementById("hint");
+const view = createView(host, {
+  onToggleHandRaise: () => { const on = host._hr = !host._hr; view.setHandRaise(on); hint.textContent = on ? "hands-free on — now “raise your hand”" : "hands-free off"; if (on) play(); },
+  onTapToTalk: () => play(),
+  onLang: (c) => { hint.textContent = "language → " + c; },
+  onType: (t) => { view.setState("thinking"); setTimeout(() => streamAnswer(), 500); },
+  onSeek: (s) => { hint.textContent = "⏱ seek to " + s + "s (would move the player)"; },
+  onFeedback: (r) => { hint.textContent = r > 0 ? "👍 thanks — logged" : "👎 noted — logged"; },
+});
+view.mountLangs([
+  {code:"en-US",label:"EN"},{code:"pt-BR",label:"PT"},
+], "en-US");
+
+let timers = [];
+const clear = () => { timers.forEach(clearTimeout); timers = []; };
+const at = (ms, fn) => timers.push(setTimeout(fn, ms));
+
+const QUESTION = "Wait, how does this clipping relate to what's coming?";
+const ANSWER = "Clipping just keeps each policy update small, so training stays stable — that's all the ratio bound is doing. You don't need the full derivation yet; the reasoning lecture builds GRPO right on top of this, around 41:36.";
+
+function typeInto(target, full, done){
+  let i=0; const step=()=>{ target(full.slice(0,i)); if(i++<full.length) at(28,step); else done&&done(); }; step();
+}
+function streamAnswer(done){
+  view.beginAnswer(); const words = ANSWER.split(" "); let i=0;
+  const step=()=>{ view.appendAnswer((i?" ":"")+words[i]); if(++i<words.length) at(70,step);
+    else at(300,()=>{ view.finishAnswer({ id:"ans_demo", meta:"Lecture 5 · anchored to 41:36 · GRPO → Lecture 6" }); done&&done(); }); };
+  step();
+}
+function play(){
+  clear();
+  view.setState("listening"); view.setTranscript(""); hint.textContent = "listening…";
+  at(500, ()=> typeInto((t)=>view.setTranscript(t), QUESTION, ()=> at(500, ()=>{
+    view.setState("thinking");
+    at(700, ()=> streamAnswer(()=> at(4200, ()=>{
+      view.showFollowup("Any other questions?");
+      at(3200, ()=>{ hint.textContent = "said “no” → lecture resumes"; view.setState("idle"); });
+    })));
+  })));
+}
+
+document.getElementById("play").onclick = play;
+document.getElementById("idle").onclick = () => { clear(); view.setState("idle"); };
+document.querySelectorAll("[data-s]").forEach(b => b.onclick = () => {
+  clear();
+  if (b.dataset.s === "listening") { view.setState("listening"); view.setTranscript(QUESTION); }
+  else if (b.dataset.s === "answer") { streamAnswer(); }
+  else if (b.dataset.s === "followup") { view.showFollowup("Any other questions?"); }
+});
+document.getElementById("bright").onclick = () => slide.classList.toggle("bright");
+</script>
