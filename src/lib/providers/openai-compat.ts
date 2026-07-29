@@ -61,8 +61,9 @@ export class OpenAICompatProvider implements LLMProvider {
   readonly name: string;
   private endpoint: string;
   private apiKey: string;
+  private extraBody: Record<string, unknown>;
 
-  constructor(name: string, baseUrl: string, apiKeyEnv: string) {
+  constructor(name: string, baseUrl: string, apiKeyEnv: string, extraBody: Record<string, unknown> = {}) {
     this.name = name;
     this.endpoint = `${baseUrl.replace(/\/$/, "")}/chat/completions`;
     const key = process.env[apiKeyEnv];
@@ -70,6 +71,7 @@ export class OpenAICompatProvider implements LLMProvider {
       throw new Error(`missing ${apiKeyEnv} for provider "${name}" (set it in .env)`);
     }
     this.apiKey = key;
+    this.extraBody = extraBody;
   }
 
   // Signal lets the caller abort a request that hangs (no timeout on fetch = a
@@ -97,6 +99,7 @@ export class OpenAICompatProvider implements LLMProvider {
     try {
       const res = await this.post(
         {
+          ...this.extraBody,
           model: req.model,
           max_tokens: req.maxTokens,
           messages: toMessages(req.segments),
@@ -153,6 +156,7 @@ export class OpenAICompatProvider implements LLMProvider {
     try {
       res = await this.post(
         {
+          ...this.extraBody,
           model: req.model,
           max_tokens: req.maxTokens,
           messages: toMessages(req.segments),

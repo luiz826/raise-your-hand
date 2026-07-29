@@ -24,10 +24,13 @@ export interface ResolvedModel {
 interface CompatConfig {
   baseUrl: string;
   apiKeyEnv: string;
+  extraBody?: Record<string, unknown>; // merged into every request body for this provider
 }
 const COMPAT: Record<string, CompatConfig> = {
   openai: { baseUrl: "https://api.openai.com/v1", apiKeyEnv: "OPENAI_API_KEY" },
-  deepseek: { baseUrl: "https://api.deepseek.com/v1", apiKeyEnv: "DEEPSEEK_API_KEY" },
+  // DeepSeek V4 has "thinking" ON by default (~4-5s to first token) — disable it for the
+  // low-latency voice path. Remove extraBody if you want its reasoning mode back.
+  deepseek: { baseUrl: "https://api.deepseek.com/v1", apiKeyEnv: "DEEPSEEK_API_KEY", extraBody: { thinking: { type: "disabled" } } },
   groq: { baseUrl: "https://api.groq.com/openai/v1", apiKeyEnv: "GROQ_API_KEY" },
   together: { baseUrl: "https://api.together.xyz/v1", apiKeyEnv: "TOGETHER_API_KEY" },
   fireworks: { baseUrl: "https://api.fireworks.ai/inference/v1", apiKeyEnv: "FIREWORKS_API_KEY" },
@@ -71,7 +74,7 @@ export function resolveModel(spec: string): ResolvedModel {
     }
     const p = getOrMake(
       `compat:${provider}`,
-      () => new OpenAICompatProvider(provider, compat.baseUrl, compat.apiKeyEnv),
+      () => new OpenAICompatProvider(provider, compat.baseUrl, compat.apiKeyEnv, compat.extraBody),
     );
     return { provider: p, model, spec };
   }
