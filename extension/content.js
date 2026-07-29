@@ -20,10 +20,10 @@
   // answer, the forced answer language, and the follow-up prompt/"no" detection.
   const LANGS = [
     { code: "en-US", label: "EN", name: "English", ttsLang: "en-us", voice: "am_michael",
-      followUp: "Any other questions?",
+      followUp: "Any other questions?", askMore: "Ask another", resume: "Resume ▶",
       noMore: /^(no|nope|nah|no thanks?|no thank you|that'?s all|that'?s it|i'?m good|im good|i'?m done|im done|nothing|nothing else|no more|no more questions?|all good|we'?re good|stop|thanks|thank you)\.?$/i },
     { code: "pt-BR", label: "PT", name: "Brazilian Portuguese", ttsLang: "pt-br", voice: "pm_alex",
-      followUp: "Tem mais alguma pergunta?",
+      followUp: "Tem mais alguma pergunta?", askMore: "Outra pergunta", resume: "Continuar ▶",
       noMore: /^(n[ãa]o|nada|só isso|so isso|é isso|e isso|estou bem|tô bem|to bem|acabou|para|parar|obrigad[oa]|valeu|n[ãa]o obrigad[oa])\.?$/i },
   ];
   let sttLang = "en-US";
@@ -44,8 +44,9 @@
   let busy = false;          // an /ask request is in flight
   let preparing = false;
   let listening = false;
-  let speakNext = false;     // speak the next answer aloud (question came in by voice)
+  let speakAnswers = true;   // speak answers aloud — user toggle in the dock (persisted)
   let followUpMode = false;  // listening for a "any other questions?" reply, not a fresh question
+  let voiceTurn = false;     // this question came in by voice (→ voice follow-up) vs typed (→ buttons)
   let turnActive = false;    // suspend hand detection while a turn runs
   let recognition = null;
   let finalTranscript = "";
@@ -77,7 +78,7 @@
     };
     try {
       if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.local) {
-        chrome.storage.local.get("ryhLang", (r) => { sttLang = r.ryhLang || fromNav(); if (view) view.setLang(sttLang); });
+        chrome.storage.local.get(["ryhLang", "ryhSpeak"], (r) => { sttLang = r.ryhLang || fromNav(); if (typeof r.ryhSpeak === "boolean") speakAnswers = r.ryhSpeak; if (view) { view.setLang(sttLang); view.setSpeak(speakAnswers); } });
         return;
       }
     } catch (_) {}
@@ -141,8 +142,10 @@
         .answer .who .spk i{ width:2.5px; height:5px; background:var(--amber); border-radius:1px; animation:eq .9s ease-in-out infinite; }
         .answer .who .spk i:nth-child(2){animation-delay:.15s} .answer .who .spk i:nth-child(3){animation-delay:.3s}
         .answer p{ font-family:var(--serif); font-size:clamp(17px,2.4vw,24px); line-height:1.42; color:#f6f1e8; max-width:40ch; text-wrap:pretty; letter-spacing:-.005em; margin:0; text-shadow:0 1px 10px rgba(0,0,0,.55);
-          max-height:34vh; overflow-y:auto; scrollbar-width:none; }
-        .answer p::-webkit-scrollbar{ display:none; }
+          max-height:34vh; overflow-y:auto; overscroll-behavior:contain; pointer-events:auto;
+          scrollbar-width:thin; scrollbar-color:#e6a94d80 transparent; }
+        .answer p::-webkit-scrollbar{ width:6px; }
+        .answer p::-webkit-scrollbar-thumb{ background:#e6a94d66; border-radius:3px; }
         .answer .ts{ color:var(--amber-ink); text-decoration:underline; text-underline-offset:3px; text-decoration-thickness:1px; cursor:pointer; pointer-events:auto; }
         .answer .foot{ display:flex; align-items:center; gap:14px; }
         .answer .meta{ font-size:12px; color:#8a857b; font-variant-numeric:tabular-nums; }
@@ -155,6 +158,10 @@
           background:#0c0f14cc; border:1px solid #ffffff1c; backdrop-filter:blur(6px); padding:9px 18px; border-radius:999px; box-shadow:0 10px 28px -14px #000; text-shadow:0 1px 8px rgba(0,0,0,.5); }
         .followup .mini{ display:inline-flex; gap:3px; } .followup .mini i{ width:3px; height:9px; background:var(--amber); border-radius:2px; animation:eq 1s ease-in-out infinite; }
         .followup .mini i:nth-child(2){animation-delay:.15s} .followup .mini i:nth-child(3){animation-delay:.3s}
+        .followup button, .answer .fmore button{ font-family:ui-sans-serif,-apple-system,sans-serif; font-size:13px; font-weight:600; color:#efe9de; background:#ffffff14; border:1px solid #ffffff2e; border-radius:999px; padding:6px 14px; cursor:pointer; pointer-events:auto; transition:border-color .2s ease, background .2s ease; }
+        .followup button:hover, .answer .fmore button:hover{ border-color:var(--amber); background:#e6a94d24; }
+        .followup .fresume, .answer .fmore .fresume{ color:var(--amber-ink); }
+        .answer .fmore{ display:flex; gap:8px; margin-left:auto; }
 
         .err, .statusline{ left:50%; bottom:118px; transform:translate(-50%,6px); font-size:13px; padding:8px 14px; border-radius:10px; opacity:0; transition:opacity .3s ease, transform .3s ease; max-width:min(90%,520px); text-align:center; }
         .err{ color:#f0b6a0; background:#2a1512d8; border:1px solid #a5432f66; }
@@ -173,6 +180,7 @@
         .dock .start.on{ background:#b622241a; border-color:#b62324; color:#ffb3ae; }
         .dock select{ font-weight:600; -webkit-appearance:none; appearance:none; }
         .dock .icon{ padding:8px 10px; font-size:14px; }
+        .dock .speak.off{ color:#8a857b; border-color:#ffffff14; }
         .dock .prepare{ display:none; } .dock .start{ display:none; }
         .layer.ready .dock .start{ display:flex; } .layer.can-prepare .dock .prepare{ display:flex; }
         .layer.live .dock .mic{ background:#b62324; border-color:#b62324; }
@@ -209,6 +217,7 @@
           <div class="foot">
             <span class="meta"></span>
             <span class="fb"><button data-r="1" title="Helpful">👍</button><button data-r="-1" title="Not helpful">👎</button></span>
+            <span class="fmore"></span>
           </div>
         </div>
         <div class="el followup"></div>
@@ -218,6 +227,7 @@
           <select class="lang" aria-label="Language"></select>
           <button class="icon mic" title="Tap to talk">🎤</button>
           <button class="icon type" title="Type instead (⇧A)">⌨</button>
+          <button class="icon speak" title="Professor speaks answers">🔊</button>
           <button class="prepare" title="Prepare this course">🛠 Prepare course</button>
           <button class="start" title="Hands-free"><span class="ic">✋</span><span class="tx"> Raise Your Hand</span></button>
         </div>
@@ -243,11 +253,20 @@
     q(".mic").onclick = () => h.onTapToTalk?.();
     q(".type").onclick = () => api.toggleType();
     langSel.onchange = () => h.onLang?.(langSel.value);
-    typeInput.addEventListener("keydown", (e) => {
+    q(".speak").onclick = () => h.onToggleSpeak?.();
+    // While the type box is open, hide every keystroke from YouTube — its hotkeys
+    // (space, k, f, digits, arrows) fire on document/window and never see our shadow
+    // input, so they'd act on the video. A window-capture listener runs before
+    // YouTube's; stopPropagation keeps the key from them, while the input's own text
+    // entry (a default action, not a listener) still happens normally.
+    const keyGuard = (e) => {
+      if (!layer.classList.contains("typing")) return;
       e.stopPropagation();
-      if (e.key === "Enter" && typeInput.value.trim()) { h.onType?.(typeInput.value.trim()); typeInput.value = ""; api.toggleType(false); }
-      else if (e.key === "Escape") api.toggleType(false);
-    });
+      if (e.type !== "keydown") return;
+      if (e.key === "Enter" && typeInput.value.trim()) { e.preventDefault(); h.onType?.(typeInput.value.trim()); typeInput.value = ""; api.toggleType(false); }
+      else if (e.key === "Escape") { e.preventDefault(); api.toggleType(false); }
+    };
+    ["keydown", "keyup", "keypress"].forEach((t) => window.addEventListener(t, keyGuard, true));
     fbEl.querySelectorAll("button").forEach((b) => b.onclick = () => {
       if (fbEl.dataset.done) return; fbEl.dataset.done = "1"; b.classList.add("picked");
       h.onFeedback?.(Number(b.dataset.r), answerId);
@@ -265,9 +284,10 @@
       beginAnswer() {
         textEl.textContent = ""; metaEl.textContent = ""; answerEl.classList.remove("done");
         fbEl.dataset.done = ""; fbEl.querySelectorAll(".picked").forEach((b) => b.classList.remove("picked"));
+        q(".fmore").innerHTML = ""; // drop any follow-up buttons from the previous answer
         layer.dataset.state = "answer";
       },
-      appendAnswer(delta) { if (layer.dataset.state !== "answer") this.beginAnswer(); textEl.textContent += delta; textEl.scrollTop = textEl.scrollHeight; },
+      appendAnswer(delta) { if (layer.dataset.state !== "answer") this.beginAnswer(); textEl.textContent += delta; }, // stay at the top so the reader starts at the beginning
       finishAnswer({ id, meta } = {}) {
         answerId = id || null;
         const raw = textEl.textContent; textEl.innerHTML = "";
@@ -281,14 +301,28 @@
         if (last < raw.length) textEl.append(raw.slice(last));
         if (meta) metaEl.textContent = meta;
         answerEl.classList.add("done");
+        textEl.scrollTop = 0; // show the start of the answer for reading
       },
-      showFollowup(text) { followEl.innerHTML = `${text} <span class="mini"><i></i><i></i><i></i></span>`; layer.dataset.state = "followup"; },
+      // Voice mode: a pill that replaces the answer (which was already read aloud).
+      showFollowup({ text, listening }) {
+        const mini = listening ? `<span class="mini"><i></i><i></i><i></i></span>` : "";
+        followEl.innerHTML = `<span class="fq">${text}</span>${mini}`;
+        layer.dataset.state = "followup";
+      },
+      // Silent mode: keep the answer on screen; add buttons to its footer.
+      showAnswerFollowup({ askLabel, resumeLabel }) {
+        const el = q(".fmore");
+        el.innerHTML = `<button class="fask">${askLabel}</button><button class="fresume">${resumeLabel}</button>`;
+        el.querySelector(".fask").onclick = () => h.onFollowAsk?.();
+        el.querySelector(".fresume").onclick = () => h.onFollowResume?.();
+      },
       showError(msg) { errEl.textContent = msg; layer.classList.remove("status"); layer.classList.add("err"); clearTimeout(errTimer); errTimer = setTimeout(() => layer.classList.remove("err"), 5000); },
       showStatus(text) { statusEl.textContent = text; layer.classList.add("status"); },
       clearStatus() { layer.classList.remove("status"); },
       setHandRaise(on) { startBtn.classList.toggle("on", on); layer.classList.toggle("armed", on); startBtn.querySelector(".ic").textContent = on ? "◼" : "✋"; startBtn.querySelector(".tx").textContent = on ? " Stop" : " Raise Your Hand"; },
       setReady(kind) { layer.classList.toggle("ready", kind === "ready"); layer.classList.toggle("can-prepare", kind === "prepare"); },
       setListeningUI(on) { layer.classList.toggle("live", on); },
+      setSpeak(on) { const b = q(".speak"); if (!b) return; b.textContent = on ? "🔊" : "🔇"; b.classList.toggle("off", !on); b.title = on ? "Professor speaks (on — click to mute)" : "Professor speaks (off — click to enable)"; },
       toggleType(force) {
         const show = force === undefined ? !layer.classList.contains("typing") : force;
         layer.classList.toggle("typing", show);
@@ -307,12 +341,21 @@
       onToggleHandRaise: toggleHandRaise,
       onTapToTalk: () => startTurn(),
       onLang: (code) => { sttLang = code; try { chrome.storage && chrome.storage.local && chrome.storage.local.set({ ryhLang: code }); } catch (_) {} },
-      onType: (text) => { active = true; const v = video(); if (v && !v.paused) v.pause(); maybeResetSession(); speakNext = false; ask(text); },
+      onType: (text) => { active = true; voiceTurn = false; const v = video(); if (v && !v.paused) v.pause(); maybeResetSession(); ask(text); },
       onSeek: (s) => { const v = video(); if (v) { v.currentTime = s; v.play(); } endTurn(); },
       onFeedback: (rating, id) => { if (!id) return; fetch(`${BACKEND}/feedback`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ answerId: id, rating, deviceId }) }).catch(() => {}); },
       onPrepare: prepareCourse,
+      onFollowAsk: () => { if (view) view.toggleType(true); }, // silent mode → type the next question
+      onFollowResume: resumeVideo,
+      onToggleSpeak: () => {
+        speakAnswers = !speakAnswers;
+        if (!speakAnswers) stopSpeaking();
+        if (view) view.setSpeak(speakAnswers);
+        try { chrome.storage && chrome.storage.local && chrome.storage.local.set({ ryhSpeak: speakAnswers }); } catch (_) {}
+      },
     });
     view.mountLangs(LANGS.map((l) => ({ code: l.code, label: l.label })), sttLang);
+    view.setSpeak(speakAnswers);
   }
 
   function refreshReady() {
@@ -394,7 +437,7 @@
       return endTurn(); // said nothing → quietly resume
     }
     if (view) { view.setTranscript(text); view.setState("thinking"); }
-    speakNext = true;
+    voiceTurn = true; // came in by voice → follow up by voice
     ask(text);
   }
 
@@ -426,7 +469,7 @@
         const rms = Math.sqrt(sum / buf.length);
         const now = Date.now();
         if (rms > 7) { speechDetected = true; lastLoud = now; }
-        if (speechDetected && now - lastLoud > 2200) return fire();  // paused after speaking → send
+        if (speechDetected && now - lastLoud > 1300) return fire();  // paused after speaking → send
         if (!speechDetected && now - start > 7000) return fire();    // never spoke → give up
         if (now - start > 30000) return fire();                      // hard cap
       }, 120);
@@ -675,6 +718,60 @@
     try { window.speechSynthesis && speechSynthesis.cancel(); } catch (_) {}
   }
 
+  // ---- streaming speech: speak sentences as they arrive from the LLM, so the
+  // answer starts playing after the FIRST sentence instead of the whole reply. ----
+  let speechQueue = [];
+  let speechBusy = false;
+  let speechStreamDone = false;
+  let speechOnEnd = null;
+  let speechEndFired = false;
+  const sentenceCut = (s) => { const m = /[.!?]+\s/.exec(s); return m ? m.index + m[0].length : -1; };
+
+  function speechStart(onEnd) {
+    stopSpeaking();                 // bumps speechToken, stops any current audio
+    speechQueue = [];
+    speechBusy = false;
+    speechStreamDone = false;
+    speechEndFired = false;
+    speechOnEnd = onEnd || null;
+    return speechToken;
+  }
+  function speechPush(text, token) {
+    if (token !== speechToken) return;
+    const clean = String(text).replace(/[*`]/g, "").replace(/\p{Extended_Pictographic}/gu, "").replace(/\s+/g, " ").trim();
+    if (clean) speechQueue.push(clean);
+    speechPump(token);
+  }
+  function speechEnd(token) {
+    if (token !== speechToken) return;
+    speechStreamDone = true;
+    speechPump(token);
+  }
+  function speechPump(token) {
+    if (token !== speechToken || speechBusy) return;
+    if (speechQueue.length === 0) {
+      if (speechStreamDone && !speechEndFired) { speechEndFired = true; const cb = speechOnEnd; speechOnEnd = null; if (cb) cb(); }
+      return;
+    }
+    speechBusy = true;
+    const sentence = speechQueue.shift();
+    const { voice, ttsLang } = langEntry();
+    const advance = () => { if (token !== speechToken) return; speechBusy = false; speechPump(token); };
+    fetch(`${TTS_BACKEND}/tts`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: sentence, voice, lang: ttsLang }) })
+      .then((r) => (r.ok ? r.blob() : Promise.reject(new Error("tts"))))
+      .then((blob) => {
+        if (token !== speechToken) return;
+        const url = URL.createObjectURL(blob);
+        const audio = new Audio(url);
+        currentAudio = audio;
+        const step = () => { URL.revokeObjectURL(url); if (currentAudio === audio) currentAudio = null; advance(); };
+        audio.onended = step;
+        audio.onerror = step;
+        audio.play().catch(() => { audio.onended = audio.onerror = null; URL.revokeObjectURL(url); advance(); });
+      })
+      .catch(() => { if (token === speechToken) speakBrowser(sentence, advance); }); // TTS down → browser voice
+  }
+
   // ---- follow-up loop ----
   function isNoMore(text) {
     const t = text.trim();
@@ -683,10 +780,15 @@
   function askFollowUp() {
     if (!active) return; // turn already ended — don't nag
     const L = langEntry();
-    if (view) view.showFollowup(L.followUp);
-    followUpMode = true;
-    // Speak the prompt, then start listening (so the mic doesn't hear the prompt).
-    speak(L.followUp, () => { if (followUpMode && !listening) toggleDictation(); });
+    if (voiceTurn && speakAnswers) {
+      // Voice question + speaking: pill + speak the prompt, then listen for the reply.
+      if (view) view.showFollowup({ text: L.followUp, listening: true });
+      followUpMode = true;
+      speak(L.followUp, () => { if (followUpMode && !listening) toggleDictation(); });
+    } else {
+      // Typed question (or muted): keep the answer visible, offer buttons — never open the mic.
+      if (view) view.showAnswerFollowup({ askLabel: L.askMore, resumeLabel: L.resume });
+    }
   }
   function resumeVideo() {
     const v = video();
@@ -718,9 +820,10 @@
     }
     busy = true;
     active = true;
-    stopSpeaking();
-    const speakThis = speakNext;
-    speakNext = false;
+    const speakThis = speakAnswers;
+    let speakToken = 0, speakBuf = "";
+    if (speakThis) speakToken = speechStart(askFollowUp); // speak each sentence as it arrives
+    else stopSpeaking();
     if (view) view.setState("thinking");
     const turnIndex = history.length; // 0 = first in this pause session
     const currentTimeSeconds = video() ? video().currentTime : 0;
@@ -768,13 +871,25 @@
           if (ev.type === "delta") {
             answer += ev.text;
             if (view) view.appendAnswer(ev.text);
+            if (speakThis) { // hand each finished sentence to the speech queue immediately
+              speakBuf += ev.text;
+              let cut;
+              while ((cut = sentenceCut(speakBuf)) !== -1) {
+                const s = speakBuf.slice(0, cut).trim();
+                speakBuf = speakBuf.slice(cut);
+                if (s) speechPush(s, speakToken);
+              }
+            }
           } else if (ev.type === "error") {
             if (view) view.showError(ev.code === "not_ingested" ? "This course hasn't been prepared yet." : ev.message);
+            if (speakThis) stopSpeaking(); // halt any sentences already queued
           } else if (ev.type === "done") {
             answerId = ev.answerId;
             if (view) view.finishAnswer({ id: answerId, meta: `Lecture ${lec.index} · ${fmt(currentTimeSeconds)}` });
-            // Voice turn: read the answer aloud, then offer another question.
-            if (speakThis) { if (answer) speak(answer, askFollowUp); else askFollowUp(); }
+            // Spoken: flush the last partial sentence; askFollowUp fires when the queue drains.
+            // Silent: show the follow-up (buttons) immediately.
+            if (speakThis) { if (speakBuf.trim()) speechPush(speakBuf.trim(), speakToken); speechEnd(speakToken); }
+            else askFollowUp();
           }
         }
       }

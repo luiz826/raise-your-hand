@@ -27,7 +27,7 @@ from urllib.parse import parse_qs, urlparse
 
 from faster_whisper import WhisperModel
 
-MODEL = os.environ.get("RYH_WHISPER_MODEL", "medium")
+MODEL = os.environ.get("RYH_WHISPER_MODEL", "small")  # small = much faster on CPU, still good for PT/EN
 COMPUTE = os.environ.get("RYH_WHISPER_COMPUTE", "int8")
 PORT = int(os.environ.get("RYH_STT_PORT", "8789"))
 
@@ -44,6 +44,7 @@ def transcribe(audio: bytes, lang: str | None) -> str:
             io.BytesIO(audio),
             language=lang or None,
             vad_filter=True,
+            beam_size=1,  # greedy — ~2x faster than beam search, minimal accuracy loss on short clips
         )
         return "".join(s.text for s in segments).strip()
 

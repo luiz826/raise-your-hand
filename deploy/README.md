@@ -37,7 +37,7 @@ docker compose --env-file deploy/.env -f deploy/docker-compose.yml up -d --build
 ```
 First run downloads the voice models (~2 GB, one-time, cached in a volume) and Caddy fetches TLS certs. Check:
 ```bash
-curl https://voice.yourdomain.com/health          # {"ok":true,"model":"moonshot:kimi-k3"}
+curl https://voice.yourdomain.com/health          # {"ok":true,"model":"claude-haiku-4-5"}
 docker compose -f deploy/docker-compose.yml logs -f
 ```
 
@@ -53,7 +53,7 @@ Then zip `extension/` and upload to the **Chrome Web Store** (`npm run pack:ext`
 
 ## Cost & ops
 - **Rate limits** are on by default (`RYH_ASK_PER_MIN`, `RYH_INGEST_PER_HOUR`) — tune in `deploy/.env`.
-- **LLM** is the only real cost; Kimi K3 is cheap and caches the course prefix. The spend cap in Moonshot is your safety net.
+- **LLM** is the only real cost; Haiku 4.5 is cheap ($1/$5 per M), answers are brief, and the course prefix is prompt-cached. A spend cap in the Anthropic console is your safety net.
 - **Voice** runs on CPU (no per-use cost). `RYH_WHISPER_MODEL=small` keeps latency ~1–3 s; bump to `medium` if you want more accuracy and have the CPU.
 - **Logs:** `docker compose -f deploy/docker-compose.yml logs -f <service>`. Telemetry text is off by default (`RYH_LOG_TEXT=0`).
 
