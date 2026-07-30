@@ -24,6 +24,7 @@ services:
     env_file: [.env]
     environment:
       RYH_TTS_PORT: "8788"
+      RYH_VOICE_HOST: "0.0.0.0"
     volumes:
       - voice-models:/app/tts/models
       - hf-cache:/root/.cache/huggingface
@@ -38,6 +39,7 @@ services:
     env_file: [.env]
     environment:
       RYH_STT_PORT: "8789"
+      RYH_VOICE_HOST: "0.0.0.0"
     volumes:
       - voice-models:/app/tts/models
       - hf-cache:/root/.cache/huggingface

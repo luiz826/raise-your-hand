@@ -38,6 +38,7 @@
     "offscreen"
   ],
   "host_permissions": [
+    "https://api.raise-your-hand.cloud/*",
     "http://localhost:8787/*",
     "http://localhost:8788/*",
     "http://localhost:8789/*",

@@ -1,52 +1,93 @@
 #!/usr/bin/env python3
-"""Local Whisper speech-to-text server (faster-whisper) for the Raise Your Hand
-extension. The browser's Web Speech API (Google) transcribes non-English poorly;
-this gives much better multilingual accuracy, fully local.
+"""Speech-to-text server for the Raise Your Hand extension.
 
-The extension records the spoken question and POSTs the audio here; if this server
-is down it falls back to the browser's recognizer, so it's optional.
+Forwards the recorded question to OpenAI's transcription API (gpt-4o-transcribe) —
+much better multilingual accuracy (especially Portuguese) than a small local
+Whisper, fast, and with no model to host or CPU to burn. The browser records the
+spoken question and POSTs the audio here; if this server is down the extension
+falls back to the browser's own recognizer, so it stays optional.
 
 Run in the uv-managed environment (see pyproject.toml):
 
     uv run python stt/server.py       # or ./run-voice.sh to start TTS + STT together
 
-Endpoints (CORS-open so the youtube.com content script can reach localhost):
+Endpoints (CORS-open so the youtube.com content script can reach it):
     POST /stt?lang=pt   body = audio bytes (webm/opus, wav, …) -> {"text": "..."}
     GET  /health                                               -> {"ok": true}
 
-Env: RYH_WHISPER_MODEL (default "small"; try "medium"/"large-v3" for more accuracy),
-     RYH_WHISPER_COMPUTE (default "int8"), RYH_STT_PORT (default 8789).
+Env: OPENAI_API_KEY (required), RYH_STT_MODEL (default "gpt-4o-transcribe"),
+     OPENAI_BASE_URL (default "https://api.openai.com/v1"),
+     RYH_STT_PORT (default 8789), RYH_VOICE_HOST (default 127.0.0.1; 0.0.0.0 in Docker).
 """
-import io
 import json
 import os
 import sys
-import threading
+import urllib.error
+import urllib.request
+import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
-from faster_whisper import WhisperModel
-
-MODEL = os.environ.get("RYH_WHISPER_MODEL", "small")  # small = much faster on CPU, still good for PT/EN
-COMPUTE = os.environ.get("RYH_WHISPER_COMPUTE", "int8")
+API_KEY = os.environ.get("OPENAI_API_KEY", "")
+MODEL = os.environ.get("RYH_STT_MODEL", "gpt-4o-transcribe")
+BASE = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/")
 PORT = int(os.environ.get("RYH_STT_PORT", "8789"))
+HOST = os.environ.get("RYH_VOICE_HOST", "127.0.0.1")  # 0.0.0.0 in Docker so Caddy can reach it
 
-print(f"loading Whisper model ({MODEL}, {COMPUTE}) — first run downloads it…", flush=True)
-model = WhisperModel(MODEL, device="cpu", compute_type=COMPUTE)
-_lock = threading.Lock()
-print(f"Whisper ready → POST http://127.0.0.1:{PORT}/stt  (model: {MODEL})", flush=True)
+if not API_KEY:
+    sys.stderr.write("WARNING: OPENAI_API_KEY not set — /stt will fail until it is.\n")
+print(f"STT ready → POST http://{HOST}:{PORT}/stt  (OpenAI {MODEL})", flush=True)
+
+
+def _audio_ext(audio: bytes) -> str:
+    """Sniff the container from magic bytes so OpenAI gets the right file extension
+    (the extension records webm; TTS/tests may send wav/ogg)."""
+    head = audio[:4]
+    if head == b"RIFF":
+        return "wav"
+    if head == b"OggS":
+        return "ogg"
+    if head[:3] == b"ID3" or head[:2] in (b"\xff\xfb", b"\xff\xf3", b"\xff\xf2", b"\xff\xfa"):
+        return "mp3"
+    return "webm"  # EBML (webm) or MediaRecorder default
 
 
 def transcribe(audio: bytes, lang: str | None) -> str:
-    with _lock:
-        # vad_filter trims silence so short clips don't hallucinate filler.
-        segments, _info = model.transcribe(
-            io.BytesIO(audio),
-            language=lang or None,
-            vad_filter=True,
-            beam_size=1,  # greedy — ~2x faster than beam search, minimal accuracy loss on short clips
-        )
-        return "".join(s.text for s in segments).strip()
+    """POST the audio to OpenAI /audio/transcriptions as multipart/form-data."""
+    boundary = uuid.uuid4().hex
+    ext = _audio_ext(audio)
+
+    def field(name: str, value: str) -> bytes:
+        return (
+            f'--{boundary}\r\nContent-Disposition: form-data; name="{name}"\r\n\r\n{value}\r\n'
+        ).encode("utf-8")
+
+    body = (
+        f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="audio.{ext}"\r\n'
+        f"Content-Type: application/octet-stream\r\n\r\n"
+    ).encode("utf-8") + audio + b"\r\n"
+    body += field("model", MODEL)
+    body += field("response_format", "json")
+    if lang:
+        body += field("language", lang)
+    body += f"--{boundary}--\r\n".encode("utf-8")
+
+    req = urllib.request.Request(
+        f"{BASE}/audio/transcriptions",
+        data=body,
+        headers={
+            "Authorization": f"Bearer {API_KEY}",
+            "Content-Type": f"multipart/form-data; boundary={boundary}",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=60) as r:
+            data = json.loads(r.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode("utf-8", "replace")[:400]
+        raise RuntimeError(f"OpenAI {e.code}: {detail}") from e
+    return (data.get("text") or "").strip()
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -82,7 +123,7 @@ class Handler(BaseHTTPRequestHandler):
         try:
             lang = (parse_qs(parsed.query).get("lang", [None])[0]) or None
             n = int(self.headers.get("Content-Length", "0"))
-            if n > 25_000_000:  # ~25MB cap — reject oversized/abusive uploads before decoding
+            if n > 25_000_000:  # ~25MB cap — reject oversized/abusive uploads
                 self.send_response(413)
                 self._cors()
                 self.end_headers()
@@ -98,7 +139,7 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(payload)
         except BrokenPipeError:
             pass
-        except Exception as e:  # noqa: BLE001 — keep the server alive on bad input
+        except Exception as e:  # noqa: BLE001 — keep the server alive on bad input/upstream errors
             sys.stderr.write(f"stt error: {e}\n")
             try:
                 self.send_response(500)
@@ -113,6 +154,6 @@ class Handler(BaseHTTPRequestHandler):
 
 if __name__ == "__main__":
     try:
-        ThreadingHTTPServer(("127.0.0.1", PORT), Handler).serve_forever()
+        ThreadingHTTPServer((HOST, PORT), Handler).serve_forever()
     except KeyboardInterrupt:
         print("\nbye", flush=True)

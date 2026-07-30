@@ -12,7 +12,7 @@
   // All three share it — Caddy path-routes /tts and /stt to the voice servers.
   // Leave "" for local dev (the three localhost ports below). Also add the domain
   // to host_permissions in manifest.json.
-  const DEPLOY_HOST = "";
+  const DEPLOY_HOST = "https://api.raise-your-hand.cloud";
   const BACKEND = DEPLOY_HOST || "http://localhost:8787";
   const TTS_BACKEND = DEPLOY_HOST || "http://localhost:8788"; // Kokoro neural-TTS
   const STT_BACKEND = DEPLOY_HOST || "http://localhost:8789"; // Whisper speech-to-text
@@ -47,6 +47,7 @@
   let speakAnswers = true;   // speak answers aloud — user toggle in the dock (persisted)
   let followUpMode = false;  // listening for a "any other questions?" reply, not a fresh question
   let voiceTurn = false;     // this question came in by voice (→ voice follow-up) vs typed (→ buttons)
+  let ignoreDictation = false; // drop a dictation result cancelled by a follow-up button
   let turnActive = false;    // suspend hand detection while a turn runs
   let recognition = null;
   let finalTranscript = "";
@@ -162,6 +163,9 @@
         .followup button:hover, .answer .fmore button:hover{ border-color:var(--amber); background:#e6a94d24; }
         .followup .fresume, .answer .fmore .fresume{ color:var(--amber-ink); }
         .answer .fmore{ display:flex; gap:8px; margin-left:auto; }
+        .answer .who .stopspk{ display:none; margin-left:10px; font-size:11px; font-weight:600; color:#f0b6a0; background:#2a151566; border:1px solid #a5432f88; border-radius:999px; padding:2px 10px; cursor:pointer; pointer-events:auto; letter-spacing:0; text-transform:none; }
+        .answer .who .stopspk:hover{ background:#a5432f66; border-color:#f0b6a0; }
+        .layer.speaking .answer .who .stopspk{ display:inline-block; }
 
         .err, .statusline{ left:50%; bottom:118px; transform:translate(-50%,6px); font-size:13px; padding:8px 14px; border-radius:10px; opacity:0; transition:opacity .3s ease, transform .3s ease; max-width:min(90%,520px); text-align:center; }
         .err{ color:#f0b6a0; background:#2a1512d8; border:1px solid #a5432f66; }
@@ -212,7 +216,7 @@
           <div class="said"></div>
         </div>
         <div class="el answer">
-          <div class="who"><span class="spk"><i></i><i></i><i></i></span> Teaching assistant</div>
+          <div class="who"><span class="spk"><i></i><i></i><i></i></span> Teaching assistant <button class="stopspk" title="Stop speaking">⏹ Stop</button></div>
           <p class="text"></p>
           <div class="foot">
             <span class="meta"></span>
@@ -254,6 +258,7 @@
     q(".type").onclick = () => api.toggleType();
     langSel.onchange = () => h.onLang?.(langSel.value);
     q(".speak").onclick = () => h.onToggleSpeak?.();
+    q(".stopspk").onclick = () => h.onStop?.();
     // While the type box is open, hide every keystroke from YouTube — its hotkeys
     // (space, k, f, digits, arrows) fire on document/window and never see our shadow
     // input, so they'd act on the video. A window-capture listener runs before
@@ -303,10 +308,13 @@
         answerEl.classList.add("done");
         textEl.scrollTop = 0; // show the start of the answer for reading
       },
-      // Voice mode: a pill that replaces the answer (which was already read aloud).
-      showFollowup({ text, listening }) {
+      // Voice mode: a pill with the prompt + a listening indicator + manual buttons
+      // (so the learner can click if the "yes/no" mishears).
+      showFollowup({ text, listening, askLabel, resumeLabel }) {
         const mini = listening ? `<span class="mini"><i></i><i></i><i></i></span>` : "";
-        followEl.innerHTML = `<span class="fq">${text}</span>${mini}`;
+        followEl.innerHTML = `<span class="fq">${text}</span>${mini}<button class="fask">${askLabel}</button><button class="fresume">${resumeLabel}</button>`;
+        followEl.querySelector(".fask").onclick = () => h.onFollowAsk?.();
+        followEl.querySelector(".fresume").onclick = () => h.onFollowResume?.();
         layer.dataset.state = "followup";
       },
       // Silent mode: keep the answer on screen; add buttons to its footer.
@@ -322,6 +330,7 @@
       setHandRaise(on) { startBtn.classList.toggle("on", on); layer.classList.toggle("armed", on); startBtn.querySelector(".ic").textContent = on ? "◼" : "✋"; startBtn.querySelector(".tx").textContent = on ? " Stop" : " Raise Your Hand"; },
       setReady(kind) { layer.classList.toggle("ready", kind === "ready"); layer.classList.toggle("can-prepare", kind === "prepare"); },
       setListeningUI(on) { layer.classList.toggle("live", on); },
+      setSpeaking(on) { layer.classList.toggle("speaking", on); },
       setSpeak(on) { const b = q(".speak"); if (!b) return; b.textContent = on ? "🔊" : "🔇"; b.classList.toggle("off", !on); b.title = on ? "Professor speaks (on — click to mute)" : "Professor speaks (off — click to enable)"; },
       toggleType(force) {
         const show = force === undefined ? !layer.classList.contains("typing") : force;
@@ -345,8 +354,17 @@
       onSeek: (s) => { const v = video(); if (v) { v.currentTime = s; v.play(); } endTurn(); },
       onFeedback: (rating, id) => { if (!id) return; fetch(`${BACKEND}/feedback`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ answerId: id, rating, deviceId }) }).catch(() => {}); },
       onPrepare: prepareCourse,
-      onFollowAsk: () => { if (view) view.toggleType(true); }, // silent mode → type the next question
-      onFollowResume: resumeVideo,
+      onFollowAsk: () => { // ask another — re-listen (voice) or open the type box
+        followUpMode = false; stopSpeaking();
+        if (voiceTurn) { if (!listening) toggleDictation(); }
+        else if (view) view.toggleType(true);
+      },
+      onFollowResume: () => { // stop everything and play on
+        followUpMode = false; stopSpeaking();
+        if (listening) { ignoreDictation = true; stopDictation(); }
+        resumeVideo();
+      },
+      onStop: () => { stopSpeaking(); askFollowUp(false); }, // cut the spoken answer short, go to the follow-up
       onToggleSpeak: () => {
         speakAnswers = !speakAnswers;
         if (!speakAnswers) stopSpeaking();
@@ -429,6 +447,7 @@
 
   // Shared post-transcription handling for both engines.
   function finishDictation(raw) {
+    if (ignoreDictation) { ignoreDictation = false; return; } // cancelled by a button
     const text = (raw || "").trim();
     if (followUpMode) {
       followUpMode = false;
@@ -716,16 +735,28 @@
     speechToken++;
     try { if (currentAudio) { currentAudio.pause(); currentAudio = null; } } catch (_) {}
     try { window.speechSynthesis && speechSynthesis.cancel(); } catch (_) {}
+    if (view) view.setSpeaking(false);
   }
 
   // ---- streaming speech: speak sentences as they arrive from the LLM, so the
-  // answer starts playing after the FIRST sentence instead of the whole reply. ----
+  // answer starts playing after the FIRST sentence instead of the whole reply.
+  // The next sentence is synthesized one ahead (prefetch) so playback is gapless
+  // — otherwise there's an audible pause at each "." while the next clip renders. ----
   let speechQueue = [];
   let speechBusy = false;
   let speechStreamDone = false;
   let speechOnEnd = null;
   let speechEndFired = false;
+  let speechNext = null; // prefetched Promise<blobUrl|null> for the head of the queue
   const sentenceCut = (s) => { const m = /[.!?]+\s/.exec(s); return m ? m.index + m[0].length : -1; };
+
+  // Synthesize one sentence → object URL (null if the turn was superseded).
+  function ttsFetch(sentence, token) {
+    const { voice, ttsLang } = langEntry();
+    return fetch(`${TTS_BACKEND}/tts`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: sentence, voice, lang: ttsLang }) })
+      .then((r) => (r.ok ? r.blob() : Promise.reject(new Error("tts"))))
+      .then((blob) => (token === speechToken ? URL.createObjectURL(blob) : null));
+  }
 
   function speechStart(onEnd) {
     stopSpeaking();                 // bumps speechToken, stops any current audio
@@ -733,6 +764,7 @@
     speechBusy = false;
     speechStreamDone = false;
     speechEndFired = false;
+    speechNext = null;
     speechOnEnd = onEnd || null;
     return speechToken;
   }
@@ -755,13 +787,15 @@
     }
     speechBusy = true;
     const sentence = speechQueue.shift();
-    const { voice, ttsLang } = langEntry();
+    const urlPromise = speechNext || ttsFetch(sentence, token);
+    speechNext = null;
+    // Kick off the next sentence's synthesis NOW so it's ready the moment this ends.
+    if (speechQueue.length > 0) speechNext = ttsFetch(speechQueue[0], token);
     const advance = () => { if (token !== speechToken) return; speechBusy = false; speechPump(token); };
-    fetch(`${TTS_BACKEND}/tts`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: sentence, voice, lang: ttsLang }) })
-      .then((r) => (r.ok ? r.blob() : Promise.reject(new Error("tts"))))
-      .then((blob) => {
+    urlPromise
+      .then((url) => {
         if (token !== speechToken) return;
-        const url = URL.createObjectURL(blob);
+        if (!url) return advance();
         const audio = new Audio(url);
         currentAudio = audio;
         const step = () => { URL.revokeObjectURL(url); if (currentAudio === audio) currentAudio = null; advance(); };
@@ -769,22 +803,26 @@
         audio.onerror = step;
         audio.play().catch(() => { audio.onended = audio.onerror = null; URL.revokeObjectURL(url); advance(); });
       })
-      .catch(() => { if (token === speechToken) speakBrowser(sentence, advance); }); // TTS down → browser voice
+      .catch(() => { if (token === speechToken) speakBrowser(sentence, advance); else advance(); }); // TTS down → browser voice
   }
 
   // ---- follow-up loop ----
   function isNoMore(text) {
     const t = text.trim();
-    return !t || langEntry().noMore.test(t);
+    if (!t) return true;
+    if (/^(no|n[ãa]o|nope|nah)[.!\s]*$/i.test(t)) return true; // STT often mis-hears "não" as "no"
+    return LANGS.some((l) => l.noMore.test(t)); // accept any language's negative — STT can drift
   }
-  function askFollowUp() {
+  function askFollowUp(speakPrompt = true) {
     if (!active) return; // turn already ended — don't nag
+    if (view) view.setSpeaking(false);
     const L = langEntry();
     if (voiceTurn && speakAnswers) {
-      // Voice question + speaking: pill + speak the prompt, then listen for the reply.
-      if (view) view.showFollowup({ text: L.followUp, listening: true });
+      // Voice question + speaking: pill + buttons + speak the prompt, then listen.
+      if (view) view.showFollowup({ text: L.followUp, listening: true, askLabel: L.askMore, resumeLabel: L.resume });
       followUpMode = true;
-      speak(L.followUp, () => { if (followUpMode && !listening) toggleDictation(); });
+      if (speakPrompt) speak(L.followUp, () => { if (followUpMode && !listening) toggleDictation(); });
+      else if (!listening) toggleDictation(); // came from Stop — skip re-speaking, go straight to listening
     } else {
       // Typed question (or muted): keep the answer visible, offer buttons — never open the mic.
       if (view) view.showAnswerFollowup({ askLabel: L.askMore, resumeLabel: L.resume });
@@ -822,7 +860,7 @@
     active = true;
     const speakThis = speakAnswers;
     let speakToken = 0, speakBuf = "";
-    if (speakThis) speakToken = speechStart(askFollowUp); // speak each sentence as it arrives
+    if (speakThis) { speakToken = speechStart(askFollowUp); if (view) view.setSpeaking(true); } // speak sentences as they arrive
     else stopSpeaking();
     if (view) view.setState("thinking");
     const turnIndex = history.length; // 0 = first in this pause session

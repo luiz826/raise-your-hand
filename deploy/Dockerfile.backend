@@ -7,7 +7,7 @@ RUN npm ci
 
 COPY tsconfig.json ./
 COPY src ./src
-COPY scripts ./scripts
+# (scripts/ are dev-only CLIs and are excluded by .dockerignore — the server doesn't need them)
 
 ENV NODE_ENV=production
 EXPOSE 8787

@@ -1,46 +1,66 @@
 #!/usr/bin/env python3
-"""Local Kokoro neural-TTS server for the Raise Your Hand extension.
+"""Text-to-speech server for the Raise Your Hand extension.
 
-The extension's spoken answers sound robotic on the browser's speechSynthesis;
-this serves natural Kokoro audio instead. The extension POSTs text here and plays
-the returned WAV (falling back to the browser voice if this server is down).
+Forwards text to OpenAI's speech API (gpt-4o-mini-tts) — a natural, fast,
+multilingual voice (PT + EN) with no local model to host or CPU to burn. The
+extension POSTs a sentence and plays the returned audio.
 
-Run it in the uv-managed environment (see pyproject.toml):
+Run in the uv-managed environment (see pyproject.toml):
 
     uv run python tts/server.py       # or ./run-voice.sh to start TTS + STT together
 
-Endpoints (CORS-open so the youtube.com content script can reach localhost):
-    POST /tts   {"text": "...", "voice": "am_michael"}  -> audio/wav
-    GET  /health                                          -> {"ok": true}
+Endpoints (CORS-open so the youtube.com content script can reach it):
+    POST /tts   body = {"text": "..."}   -> audio bytes (mp3)
+    GET  /health                          -> {"ok": true}
+
+Env: OPENAI_API_KEY (required), RYH_TTS_MODEL (default "gpt-4o-mini-tts"),
+     RYH_TTS_VOICE (default "alloy"; try onyx/ash/sage/nova/shimmer/echo/fable),
+     RYH_TTS_FORMAT (default "mp3"), RYH_TTS_INSTRUCTIONS (optional tone steer),
+     OPENAI_BASE_URL, RYH_TTS_PORT (default 8788),
+     RYH_VOICE_HOST (default 127.0.0.1; 0.0.0.0 in Docker).
 """
-import io
 import json
 import os
 import sys
-import threading
+import urllib.error
+import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import urlparse
 
-import soundfile as sf
-from kokoro_onnx import Kokoro
-
-HERE = os.path.dirname(os.path.abspath(__file__))
-MODEL = os.environ.get("RYH_KOKORO_MODEL", os.path.join(HERE, "models", "kokoro-v1.0.onnx"))
-VOICES = os.environ.get("RYH_KOKORO_VOICES", os.path.join(HERE, "models", "voices-v1.0.bin"))
+API_KEY = os.environ.get("OPENAI_API_KEY", "")
+MODEL = os.environ.get("RYH_TTS_MODEL", "gpt-4o-mini-tts")
+VOICE = os.environ.get("RYH_TTS_VOICE", "alloy")
+FMT = os.environ.get("RYH_TTS_FORMAT", "mp3")
+INSTRUCTIONS = os.environ.get(
+    "RYH_TTS_INSTRUCTIONS",
+    "Speak clearly and warmly, at a natural conversational pace, like a friendly teaching assistant.",
+)
+BASE = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/")
 PORT = int(os.environ.get("RYH_TTS_PORT", "8788"))
-DEFAULT_VOICE = os.environ.get("RYH_TTS_VOICE", "am_michael")
+HOST = os.environ.get("RYH_VOICE_HOST", "127.0.0.1")  # 0.0.0.0 in Docker so Caddy can reach it
+MIME = {"mp3": "audio/mpeg", "wav": "audio/wav", "opus": "audio/ogg", "aac": "audio/aac", "flac": "audio/flac"}.get(FMT, "audio/mpeg")
 
-print(f"loading Kokoro model ({MODEL})…", flush=True)
-kokoro = Kokoro(MODEL, VOICES)
-_lock = threading.Lock()  # espeak phonemizer isn't guaranteed thread-safe
-print(f"Kokoro ready → POST http://127.0.0.1:{PORT}/tts  (default voice: {DEFAULT_VOICE})", flush=True)
+if not API_KEY:
+    sys.stderr.write("WARNING: OPENAI_API_KEY not set — /tts will fail until it is.\n")
+print(f"TTS ready → POST http://{HOST}:{PORT}/tts  (OpenAI {MODEL}, voice {VOICE})", flush=True)
 
 
-def synth(text: str, voice: str, lang: str) -> bytes:
-    with _lock:
-        samples, sample_rate = kokoro.create(text, voice=voice, speed=1.0, lang=lang)
-    buf = io.BytesIO()
-    sf.write(buf, samples, sample_rate, format="WAV")
-    return buf.getvalue()
+def synth(text: str) -> bytes:
+    payload = {"model": MODEL, "voice": VOICE, "input": text[:4000], "response_format": FMT}
+    if INSTRUCTIONS:
+        payload["instructions"] = INSTRUCTIONS
+    req = urllib.request.Request(
+        f"{BASE}/audio/speech",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=60) as r:
+            return r.read()
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode("utf-8", "replace")[:400]
+        raise RuntimeError(f"OpenAI {e.code}: {detail}") from e
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -67,37 +87,35 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
 
     def do_POST(self):
-        if not self.path.startswith("/tts"):
+        if not urlparse(self.path).path.startswith("/tts"):
             self.send_response(404)
             self._cors()
             self.end_headers()
             return
         try:
             n = int(self.headers.get("Content-Length", "0"))
-            if n > 200_000:  # a text request is tiny — reject anything abusive
+            if n > 200_000:  # text payload cap
                 self.send_response(413)
                 self._cors()
                 self.end_headers()
                 return
-            body = json.loads(self.rfile.read(n) or b"{}")
-            text = (body.get("text") or "").strip()[:2000]  # cap synthesis length
-            voice = body.get("voice") or DEFAULT_VOICE
-            lang = body.get("lang") or "en-us"
+            body = json.loads(self.rfile.read(n) or b"{}") if n else {}
+            text = (body.get("text") or "").strip()
             if not text:
                 self.send_response(400)
                 self._cors()
                 self.end_headers()
                 return
-            wav = synth(text, voice, lang)
+            audio = synth(text)
             self.send_response(200)
             self._cors()
-            self.send_header("Content-Type", "audio/wav")
-            self.send_header("Content-Length", str(len(wav)))
+            self.send_header("Content-Type", MIME)
+            self.send_header("Content-Length", str(len(audio)))
             self.end_headers()
-            self.wfile.write(wav)
+            self.wfile.write(audio)
         except BrokenPipeError:
-            pass  # client navigated away / stopped playback mid-stream
-        except Exception as e:  # noqa: BLE001 — keep the server alive on bad input
+            pass
+        except Exception as e:  # noqa: BLE001 — keep the server alive on bad input/upstream errors
             sys.stderr.write(f"tts error: {e}\n")
             try:
                 self.send_response(500)
@@ -107,11 +125,11 @@ class Handler(BaseHTTPRequestHandler):
                 pass
 
     def log_message(self, *args):
-        pass  # quiet; errors still go to stderr
+        pass
 
 
 if __name__ == "__main__":
     try:
-        ThreadingHTTPServer(("127.0.0.1", PORT), Handler).serve_forever()
+        ThreadingHTTPServer((HOST, PORT), Handler).serve_forever()
     except KeyboardInterrupt:
         print("\nbye", flush=True)
