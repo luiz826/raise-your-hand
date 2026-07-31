@@ -33,3 +33,12 @@
 		reverse_proxy backend:8787
 	}
 }
+
+# Landing page + privacy policy on the apex (and www). Static files, auto-HTTPS.
+# RYH_SITE_DOMAIN can list several addresses, e.g. "example.com, www.example.com".
+{$RYH_SITE_DOMAIN:localhost} {
+	encode zstd gzip
+	root * /srv/site
+	try_files {path} {path}.html {path}/index.html
+	file_server
+}

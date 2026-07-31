@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Privacy Policy — Raise Your Hand</title>
+<meta name="robots" content="index">
+<style>
+  :root{
+    --bg:#0a0c10; --ink:#efe9dd; --dim:#a29d92; --amber:#e6a94d; --amber-ink:#f2c579; --line:#ffffff18;
+    --serif:'Charter','Iowan Old Style','Palatino Linotype',Georgia,serif;
+  }
+  *{ box-sizing:border-box; }
+  body{ margin:0; background:var(--bg); color:var(--ink);
+    font-family:ui-sans-serif,-apple-system,'Segoe UI',Roboto,sans-serif; font-size:17px; line-height:1.65; -webkit-font-smoothing:antialiased; }
+  a{ color:var(--amber-ink); }
+  .wrap{ max-width:720px; margin:0 auto; padding:40px 24px 90px; }
+  .brand{ display:flex; align-items:center; gap:9px; font-family:var(--serif); font-size:18px; font-weight:600; color:var(--ink); text-decoration:none; }
+  h1{ font-family:var(--serif); font-weight:600; font-size:clamp(30px,5vw,42px); letter-spacing:-.015em; margin:34px 0 4px; }
+  .updated{ color:var(--dim); font-size:14px; margin:0 0 8px; }
+  .intro{ color:var(--dim); font-size:18px; margin:18px 0 8px; }
+  h2{ font-family:var(--serif); font-size:22px; font-weight:600; margin:38px 0 6px; padding-top:8px; }
+  p{ margin:12px 0; }
+  ul{ margin:12px 0; padding-left:22px; }
+  li{ margin:8px 0; }
+  strong{ color:var(--chalk,#f4efe5); }
+  .callout{ background:#16130b; border:1px solid #e6a94d33; border-radius:12px; padding:17px 20px; margin:20px 0; color:var(--ink); }
+  hr{ border:none; border-top:1px solid var(--line); margin:40px 0; }
+  footer{ color:var(--dim); font-size:14px; }
+  footer a{ color:var(--dim); }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <a class="brand" href="/">✋ Raise Your Hand</a>
+    <h1>Privacy Policy</h1>
+    <p class="updated">Last updated: 31 July 2026</p>
+    <p class="intro">Raise Your Hand is a browser extension that lets you ask questions about the YouTube university lecture you're watching. This policy explains, plainly, what it handles and why.</p>
+
+    <div class="callout"><strong>The short version:</strong> your webcam is processed on your own device and its video is never uploaded. Your spoken and typed questions, and (optionally) a screenshot of the paused slide, are sent to the service to produce an answer. No name, email, or account is collected, and nothing is sold or used for ads.</div>
+
+    <h2>Your camera</h2>
+    <p>When you turn on hands-free mode, the extension uses your webcam to detect a raised hand. This runs entirely inside your browser: the camera images are analysed locally and <strong>never leave your device</strong>. Only the resulting event ("a hand was raised") is used, to pause the video and start listening. You can turn the camera off in the extension's settings and ask with a button or a keyboard shortcut instead.</p>
+
+    <h2>Your microphone and questions</h2>
+    <p>When you ask out loud, the extension records that short clip and sends the audio to the service, which forwards it to a speech-to-text provider (OpenAI) to transcribe it. Questions you type are sent as text. To speak the answer back, the answer text is sent to a text-to-speech provider (OpenAI). You can turn spoken answers off and type instead.</p>
+
+    <h2>Screenshots</h2>
+    <p>On the first question of a pause, the extension can capture a single screenshot of the paused video frame and include it, so the assistant can see what's on the slide. This is optional and can be disabled in settings; when disabled, no screenshot is captured or sent.</p>
+
+    <h2>Lecture context and an anonymous ID</h2>
+    <p>To answer a question, the extension reads the video ID, playlist ID, and your current playback position from the YouTube page, and sends them with your question and the recent questions and answers from the same pause. To prepare a course you haven't used before, it also fetches that course's public lecture transcripts from YouTube (in your browser) and uploads them so the service can build a course summary.</p>
+    <p>The extension generates a random <strong>device ID</strong> on first use and stores it locally. It is not linked to your name, email, or Google account, and is not used to track you across sites. It exists only so ratings and usage can be counted without identifying you.</p>
+
+    <h2>How answers are generated</h2>
+    <p>The service sends the lecture context and your question to an AI model provider (Anthropic) to generate the answer, and uses OpenAI for transcription and speech, each subject to that provider's own terms. Prepared course data, questions, answers, and thumbs-up/down ratings are stored on the service to run it and to compute anonymous, aggregate metrics (for example, how often answers are rated helpful). You can turn off sending anonymous usage and feedback in settings.</p>
+
+    <h2>What the extension does not do</h2>
+    <ul>
+      <li>It does not read your browsing history, other tabs, cookies, passwords, or any site other than the YouTube watch page it runs on.</li>
+      <li>It does not collect your name, email, or account, and does not sell data or use it for advertising.</li>
+      <li>It does not track you across sites.</li>
+    </ul>
+
+    <h2>Your choices</h2>
+    <ul>
+      <li>Turn the camera, spoken answers, screenshots, or anonymous feedback off at any time in the extension's settings.</li>
+      <li>Uninstalling the extension stops all collection and clears the locally stored device ID.</li>
+      <li>You can request deletion of data tied to your device ID by contacting us below.</li>
+    </ul>
+
+    <h2>Contact</h2>
+    <p>Questions about this policy: <a href="mailto:privacy@raise-your-hand.cloud">privacy@raise-your-hand.cloud</a>.</p>
+
+    <hr>
+    <footer><a href="/">← Back to Raise Your Hand</a></footer>
+  </div>
+</body>
+</html>
