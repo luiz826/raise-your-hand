@@ -123,6 +123,8 @@ interface AskBody {
   turnIndex?: number; // 0 = first question in a pause session; >0 = follow-up
   image?: { mediaType?: string; base64?: string }; // captured video frame for a visual question
   answerLanguage?: string; // the learner's chosen language (e.g. "Brazilian Portuguese") — force the reply into it
+  answerStyle?: string;    // "brief" (default) | "detailed"
+  spoilers?: string;       // "strict" (default) | "relaxed"
 }
 
 // POST /ask — streams NDJSON: {type:"meta"|"delta"|"done"|"error", ...}
@@ -181,6 +183,8 @@ async function handleAsk(res: http.ServerResponse, body: AskBody, key: string) {
       typeof body.answerLanguage === "string"
         ? body.answerLanguage.replace(/[\r\n]+/g, " ").slice(0, 40)
         : undefined;
+    const answerStyle = body.answerStyle === "detailed" ? "detailed" : "brief";
+    const spoilers = body.spoilers === "relaxed" ? "relaxed" : "strict";
     const segments = assembleSegments(
       course.map,
       lecture.index,
@@ -190,6 +194,8 @@ async function handleAsk(res: http.ServerResponse, body: AskBody, key: string) {
       question.trim(),
       image,
       answerLanguage,
+      answerStyle,
+      spoilers,
     );
 
     const { text: answer, usage } = await runQA(qaModel, segments, (t) =>

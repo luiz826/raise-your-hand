@@ -9,6 +9,10 @@ const DEFAULTS = {
   ryhGesture: true,
   ryhCapture: true,
   ryhPanel: "right",
+  ryhStyle: "brief",
+  ryhSpoilers: "strict",
+  ryhSpeed: 1,
+  ryhTimestamps: true,
 };
 
 const $ = (id) => document.getElementById(id);
@@ -29,6 +33,10 @@ chrome.storage.local.get(Object.keys(DEFAULTS), (r) => {
   $("gesture").checked = !!g("ryhGesture");
   $("capture").checked = !!g("ryhCapture");
   $("panel").value = g("ryhPanel");
+  $("style").value = g("ryhStyle");
+  $("spoilers").value = g("ryhSpoilers");
+  $("speed").value = String(g("ryhSpeed"));
+  $("timestamps").checked = g("ryhTimestamps") !== false;
 });
 
 $("lang").addEventListener("change", (e) => save("ryhLang", e.target.value));
@@ -37,3 +45,8 @@ $("voice").addEventListener("change", (e) => save("ryhVoice", e.target.value));
 $("gesture").addEventListener("change", (e) => save("ryhGesture", e.target.checked));
 $("capture").addEventListener("change", (e) => save("ryhCapture", e.target.checked));
 $("panel").addEventListener("change", (e) => save("ryhPanel", e.target.value));
+$("style").addEventListener("change", (e) => save("ryhStyle", e.target.value));
+$("spoilers").addEventListener("change", (e) => save("ryhSpoilers", e.target.value));
+$("speed").addEventListener("change", (e) => save("ryhSpeed", parseFloat(e.target.value)));
+$("timestamps").addEventListener("change", (e) => save("ryhTimestamps", e.target.checked));
+$("reset").addEventListener("click", () => chrome.storage.local.set({ ...DEFAULTS }, () => location.reload()));

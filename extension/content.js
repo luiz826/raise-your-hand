@@ -53,6 +53,10 @@
   let gestureOn = true;   // webcam hand-raise detection
   let captureOn = true;   // send a screenshot on the first question of a session
   let panelPos = "right"; // answer panel position: right | bottom | left
+  let answerStyle = "brief";  // brief | detailed
+  let spoilers = "strict";    // strict | relaxed
+  let ttsSpeed = 1;           // spoken pace hint
+  let showTimestamps = true;  // clickable timestamps in answers
   let turnActive = false;    // suspend hand detection while a turn runs
   let recognition = null;
   let finalTranscript = "";
@@ -84,13 +88,17 @@
     };
     try {
       if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.local) {
-        chrome.storage.local.get(["ryhLang", "ryhSpeak", "ryhVoice", "ryhGesture", "ryhCapture", "ryhPanel"], (r) => {
+        chrome.storage.local.get(["ryhLang", "ryhSpeak", "ryhVoice", "ryhGesture", "ryhCapture", "ryhPanel", "ryhStyle", "ryhSpoilers", "ryhSpeed", "ryhTimestamps"], (r) => {
           sttLang = r.ryhLang || fromNav();
           if (typeof r.ryhSpeak === "boolean") speakAnswers = r.ryhSpeak;
           if (r.ryhVoice) ttsVoice = r.ryhVoice;
           if (typeof r.ryhGesture === "boolean") gestureOn = r.ryhGesture;
           if (typeof r.ryhCapture === "boolean") captureOn = r.ryhCapture;
           if (r.ryhPanel) panelPos = r.ryhPanel;
+          if (r.ryhStyle) answerStyle = r.ryhStyle;
+          if (r.ryhSpoilers) spoilers = r.ryhSpoilers;
+          if (typeof r.ryhSpeed === "number") ttsSpeed = r.ryhSpeed;
+          if (typeof r.ryhTimestamps === "boolean") showTimestamps = r.ryhTimestamps;
           applyPrefs();
         });
         return;
@@ -106,6 +114,7 @@
     view.setEscapeLabel(langEntry().resume);
     view.setPanel(panelPos);
     view.setGesture(gestureOn);
+    view.setTimestamps(showTimestamps);
     if (!gestureOn && handRaiseOn) stopHandRaise();
   }
   // Live-apply settings changed on the options page (or the in-page dock).
@@ -118,6 +127,10 @@
       if (changes.ryhGesture) gestureOn = !!changes.ryhGesture.newValue;
       if (changes.ryhCapture) captureOn = !!changes.ryhCapture.newValue;
       if (changes.ryhPanel) panelPos = changes.ryhPanel.newValue || "right";
+      if (changes.ryhStyle) answerStyle = changes.ryhStyle.newValue || "brief";
+      if (changes.ryhSpoilers) spoilers = changes.ryhSpoilers.newValue || "strict";
+      if (changes.ryhSpeed) ttsSpeed = changes.ryhSpeed.newValue || 1;
+      if (changes.ryhTimestamps) showTimestamps = changes.ryhTimestamps.newValue !== false;
       applyPrefs();
     });
   }
@@ -283,7 +296,7 @@
     const said = q(".said"), answerEl = q(".answer"), textEl = q(".text"), metaEl = q(".meta"),
           fbEl = q(".fb"), errEl = q(".err"), statusEl = q(".statusline"),
           startBtn = q(".start"), langSel = q(".lang"), typeInput = q(".typeline input");
-    let answerId = null, errTimer = null, dockTimer = null;
+    let answerId = null, errTimer = null, dockTimer = null, tsOn = true;
 
     // reveal the dock on any pointer movement (the overlay itself is click-through)
     document.addEventListener("mousemove", () => {
@@ -337,15 +350,17 @@
       appendAnswer(delta) { if (layer.dataset.state !== "answer") this.beginAnswer(); textEl.textContent += delta; }, // stay at the top so the reader starts at the beginning
       finishAnswer({ id, meta } = {}) {
         answerId = id || null;
-        const raw = textEl.textContent; textEl.innerHTML = "";
-        let last = 0, m; TS.lastIndex = 0;
-        while ((m = TS.exec(raw))) {
-          if (m.index > last) textEl.append(raw.slice(last, m.index));
-          const a = document.createElement("span"); a.className = "ts"; a.textContent = m[1];
-          a.onclick = () => h.onSeek?.(m[1].split(":").map(Number).reduce((x, n) => x * 60 + n, 0));
-          textEl.append(a); last = m.index + m[1].length;
+        if (tsOn) {
+          const raw = textEl.textContent; textEl.innerHTML = "";
+          let last = 0, m; TS.lastIndex = 0;
+          while ((m = TS.exec(raw))) {
+            if (m.index > last) textEl.append(raw.slice(last, m.index));
+            const a = document.createElement("span"); a.className = "ts"; a.textContent = m[1];
+            a.onclick = () => h.onSeek?.(m[1].split(":").map(Number).reduce((x, n) => x * 60 + n, 0));
+            textEl.append(a); last = m.index + m[1].length;
+          }
+          if (last < raw.length) textEl.append(raw.slice(last));
         }
-        if (last < raw.length) textEl.append(raw.slice(last));
         if (meta) metaEl.textContent = meta;
         answerEl.classList.add("done");
         textEl.scrollTop = 0; // show the start of the answer for reading
@@ -371,6 +386,7 @@
       setEscapeLabel(text) { const e = q(".escape .etx"); if (e) e.textContent = text; },
       setPanel(pos) { layer.dataset.panel = pos || "right"; },
       setGesture(on) { layer.classList.toggle("no-gesture", !on); },
+      setTimestamps(on) { tsOn = on !== false; },
       setSpeak(on) { const b = q(".speak"); if (!b) return; b.textContent = on ? "🔊" : "🔇"; b.classList.toggle("off", !on); b.title = on ? "Professor speaks (on — click to mute)" : "Professor speaks (off — click to enable)"; },
       toggleType(force) {
         const show = force === undefined ? !layer.classList.contains("typing") : force;
@@ -793,7 +809,7 @@
 
   // Synthesize one sentence → object URL (null if the turn was superseded).
   function ttsFetch(sentence, token) {
-    return fetch(`${TTS_BACKEND}/tts`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: sentence, voice: ttsVoice }) })
+    return fetch(`${TTS_BACKEND}/tts`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: sentence, voice: ttsVoice, speed: ttsSpeed }) })
       .then((r) => (r.ok ? r.blob() : Promise.reject(new Error("tts"))))
       .then((blob) => (token === speechToken ? URL.createObjectURL(blob) : null));
   }
@@ -941,6 +957,7 @@
           turnIndex,
           image: image || undefined,
           answerLanguage: langEntry().name, // force the reply into the chosen language
+          answerStyle, spoilers,
         }),
       });
       if (!res.ok || !res.body) throw new Error(`backend HTTP ${res.status}`);

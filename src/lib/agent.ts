@@ -57,6 +57,8 @@ export function assembleSegments(
   question: string,
   image?: QuestionImage,
   answerLanguage?: string,
+  answerStyle?: string,
+  spoilers?: string,
 ): PromptSegment[] {
   const session = sessionSegment(map, lectureIndex, pauseSeconds, videoSegments);
   const segs: PromptSegment[] = [...systemSegments(map)];
@@ -67,6 +69,18 @@ export function assembleSegments(
     segs.push({
       role: "system",
       text: `RESPOND IN ${answerLanguage}: Write your ENTIRE answer in ${answerLanguage}. This is the student's chosen language and it overrides the default "match the question" rule — do not answer in English or any other language, even if the question looks like it is in another language (their speech was transcribed and may be imperfect).`,
+    });
+  }
+  if (answerStyle === "detailed") {
+    segs.push({
+      role: "system",
+      text: `ANSWER LENGTH: This student prefers fuller answers. You may go beyond three sentences and walk through the reasoning step by step — still as spoken prose (no headers, bullets, or numbered lists), anchored to the course's notation. Add depth where it aids understanding, not padding.`,
+    });
+  }
+  if (spoilers === "relaxed") {
+    segs.push({
+      role: "system",
+      text: `SPOILERS: This student has turned off spoiler protection. When they ask about material the course covers after the pause point, you may explain it directly instead of only deferring — still concisely and in the course's terms.`,
     });
   }
 

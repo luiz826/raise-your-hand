@@ -46,11 +46,18 @@ if not API_KEY:
 print(f"TTS ready → POST http://{HOST}:{PORT}/tts  (OpenAI {MODEL}, voice {VOICE})", flush=True)
 
 
-def synth(text: str, voice: str | None = None) -> bytes:
+def synth(text: str, voice: str | None = None, speed: float | None = None) -> bytes:
     v = voice if voice in VOICES else VOICE
+    # gpt-4o-mini-tts ignores the `speed` param — steer pace via instructions instead.
+    instr = INSTRUCTIONS
+    if isinstance(speed, (int, float)):
+        if speed <= 0.9:
+            instr = (instr + " Speak at a slower, deliberate pace.").strip()
+        elif speed >= 1.15:
+            instr = (instr + " Speak at a brisk, faster pace.").strip()
     payload = {"model": MODEL, "voice": v, "input": text[:4000], "response_format": FMT}
-    if INSTRUCTIONS:
-        payload["instructions"] = INSTRUCTIONS
+    if instr:
+        payload["instructions"] = instr
     req = urllib.request.Request(
         f"{BASE}/audio/speech",
         data=json.dumps(payload).encode("utf-8"),
@@ -108,7 +115,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._cors()
                 self.end_headers()
                 return
-            audio = synth(text, (body.get("voice") or "").strip() or None)
+            audio = synth(text, (body.get("voice") or "").strip() or None, body.get("speed"))
             self.send_response(200)
             self._cors()
             self.send_header("Content-Type", MIME)
