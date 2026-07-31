@@ -1,13 +1,9 @@
 [project]
 name = "raise-your-hand-voice"
 version = "0.1.0"
-description = "Local Kokoro TTS + Whisper STT servers for the Raise Your Hand extension."
+description = "OpenAI STT + TTS proxy servers for the Raise Your Hand extension (stdlib only)."
 requires-python = ">=3.11"
-dependencies = [
-    "kokoro-onnx>=0.5.0",
-    "faster-whisper>=1.2.0",
-    "soundfile>=0.14.0",
-]
+dependencies = []
 
 # Not a packaged library — just a managed environment for the two voice servers.
 [tool.uv]

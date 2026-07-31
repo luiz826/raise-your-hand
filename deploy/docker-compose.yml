@@ -47,7 +47,9 @@ services:
     restart: unless-stopped
 
   caddy:
-    image: caddy:2
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.caddy   # Caddy + rate-limit plugin
     env_file: [.env]                 # provides RYH_DOMAIN for the Caddyfile
     ports:
       - "80:80"

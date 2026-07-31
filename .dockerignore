@@ -7,3 +7,7 @@ extension
 *.md
 scripts
 eval
+tts/models
+.venv
+demo
+docs
