@@ -13,9 +13,9 @@
   // Leave "" for local dev (the three localhost ports below). Also add the domain
   // to host_permissions in manifest.json.
   const DEPLOY_HOST = "https://api.raise-your-hand.cloud";
-  const BACKEND = DEPLOY_HOST || "http://localhost:8787";
-  const TTS_BACKEND = DEPLOY_HOST || "http://localhost:8788"; // Kokoro neural-TTS
-  const STT_BACKEND = DEPLOY_HOST || "http://localhost:8789"; // Whisper speech-to-text
+  let BACKEND = DEPLOY_HOST || "http://localhost:8787";       // let: overridable via the server-URL setting
+  let TTS_BACKEND = DEPLOY_HOST || "http://localhost:8788";
+  let STT_BACKEND = DEPLOY_HOST || "http://localhost:8789";
   // Voice language: drives STT (rec.lang), the Kokoro voice + lang for the spoken
   // answer, the forced answer language, and the follow-up prompt/"no" detection.
   const LANGS = [
@@ -57,6 +57,11 @@
   let spoilers = "strict";    // strict | relaxed
   let ttsSpeed = 1;           // spoken pace hint
   let showTimestamps = true;  // clickable timestamps in answers
+  let fontSize = "m";     // answer text size: s | m | l
+  let serverUrl = "";     // backend host override (advanced / self-host)
+  let vadSilence = 1300;  // ms of silence before sending speech
+  let telemetryOn = true; // anonymous usage + feedback
+  let shortcutKey = "shift+a"; // in-page shortcut to open the type box
   let turnActive = false;    // suspend hand detection while a turn runs
   let recognition = null;
   let finalTranscript = "";
@@ -88,7 +93,7 @@
     };
     try {
       if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.local) {
-        chrome.storage.local.get(["ryhLang", "ryhSpeak", "ryhVoice", "ryhGesture", "ryhCapture", "ryhPanel", "ryhStyle", "ryhSpoilers", "ryhSpeed", "ryhTimestamps"], (r) => {
+        chrome.storage.local.get(["ryhLang", "ryhSpeak", "ryhVoice", "ryhGesture", "ryhCapture", "ryhPanel", "ryhStyle", "ryhSpoilers", "ryhSpeed", "ryhTimestamps", "ryhFont", "ryhServer", "ryhVad", "ryhTelemetry", "ryhKey"], (r) => {
           sttLang = r.ryhLang || fromNav();
           if (typeof r.ryhSpeak === "boolean") speakAnswers = r.ryhSpeak;
           if (r.ryhVoice) ttsVoice = r.ryhVoice;
@@ -99,6 +104,11 @@
           if (r.ryhSpoilers) spoilers = r.ryhSpoilers;
           if (typeof r.ryhSpeed === "number") ttsSpeed = r.ryhSpeed;
           if (typeof r.ryhTimestamps === "boolean") showTimestamps = r.ryhTimestamps;
+          if (r.ryhFont) fontSize = r.ryhFont;
+          if (typeof r.ryhServer === "string") serverUrl = r.ryhServer;
+          if (typeof r.ryhVad === "number") vadSilence = r.ryhVad;
+          if (typeof r.ryhTelemetry === "boolean") telemetryOn = r.ryhTelemetry;
+          if (r.ryhKey) shortcutKey = r.ryhKey;
           applyPrefs();
         });
         return;
@@ -115,7 +125,23 @@
     view.setPanel(panelPos);
     view.setGesture(gestureOn);
     view.setTimestamps(showTimestamps);
+    view.setFont(fontSize);
+    applyServer(serverUrl);
     if (!gestureOn && handRaiseOn) stopHandRaise();
+  }
+  function applyServer(url) {
+    const base = (url || "").trim().replace(/\/$/, "");
+    BACKEND = base || DEPLOY_HOST || "http://localhost:8787";
+    TTS_BACKEND = base || DEPLOY_HOST || "http://localhost:8788";
+    STT_BACKEND = base || DEPLOY_HOST || "http://localhost:8789";
+  }
+  function matchShortcut(e, combo) {
+    if (!combo) return false;
+    const parts = combo.toLowerCase().split("+");
+    const key = parts.pop();
+    return e.shiftKey === parts.includes("shift") && e.altKey === parts.includes("alt") &&
+      e.ctrlKey === parts.includes("ctrl") && e.metaKey === parts.includes("meta") &&
+      (e.key || "").toLowerCase() === key;
   }
   // Live-apply settings changed on the options page (or the in-page dock).
   if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.onChanged) {
@@ -131,6 +157,11 @@
       if (changes.ryhSpoilers) spoilers = changes.ryhSpoilers.newValue || "strict";
       if (changes.ryhSpeed) ttsSpeed = changes.ryhSpeed.newValue || 1;
       if (changes.ryhTimestamps) showTimestamps = changes.ryhTimestamps.newValue !== false;
+      if (changes.ryhFont) fontSize = changes.ryhFont.newValue || "m";
+      if (changes.ryhServer) serverUrl = changes.ryhServer.newValue || "";
+      if (changes.ryhVad) vadSilence = changes.ryhVad.newValue || 1300;
+      if (changes.ryhTelemetry) telemetryOn = changes.ryhTelemetry.newValue !== false;
+      if (changes.ryhKey) shortcutKey = changes.ryhKey.newValue || "shift+a";
       applyPrefs();
     });
   }
@@ -190,7 +221,7 @@
         .answer .who .spk{ display:inline-flex; gap:2px; align-items:flex-end; height:11px; }
         .answer .who .spk i{ width:2.5px; height:5px; background:var(--amber); border-radius:1px; animation:eq .9s ease-in-out infinite; }
         .answer .who .spk i:nth-child(2){animation-delay:.15s} .answer .who .spk i:nth-child(3){animation-delay:.3s}
-        .answer p{ font-family:var(--serif); font-size:clamp(15px,1.7vw,19px); line-height:1.5; color:#f6f1e8; text-wrap:pretty; letter-spacing:-.005em; margin:0;
+        .answer p{ font-family:var(--serif); font-size:var(--ans-fs, clamp(15px,1.7vw,19px)); line-height:1.5; color:#f6f1e8; text-wrap:pretty; letter-spacing:-.005em; margin:0;
           flex:1 1 auto; min-height:0; overflow-y:auto; overscroll-behavior:contain; pointer-events:auto;
           scrollbar-width:thin; scrollbar-color:#e6a94d80 transparent; }
         .answer p::-webkit-scrollbar{ width:6px; }
@@ -387,6 +418,7 @@
       setPanel(pos) { layer.dataset.panel = pos || "right"; },
       setGesture(on) { layer.classList.toggle("no-gesture", !on); },
       setTimestamps(on) { tsOn = on !== false; },
+      setFont(size) { layer.style.setProperty("--ans-fs", size === "s" ? "14px" : size === "l" ? "21px" : ""); },
       setSpeak(on) { const b = q(".speak"); if (!b) return; b.textContent = on ? "🔊" : "🔇"; b.classList.toggle("off", !on); b.title = on ? "Professor speaks (on — click to mute)" : "Professor speaks (off — click to enable)"; },
       toggleType(force) {
         const show = force === undefined ? !layer.classList.contains("typing") : force;
@@ -408,7 +440,7 @@
       onLang: (code) => { sttLang = code; if (view) view.setEscapeLabel(langEntry().resume); try { chrome.storage && chrome.storage.local && chrome.storage.local.set({ ryhLang: code }); } catch (_) {} },
       onType: (text) => { active = true; voiceTurn = false; const v = video(); if (v && !v.paused) v.pause(); maybeResetSession(); ask(text); },
       onSeek: (s) => { const v = video(); if (v) { v.currentTime = s; v.play(); } endTurn(); },
-      onFeedback: (rating, id) => { if (!id) return; fetch(`${BACKEND}/feedback`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ answerId: id, rating, deviceId }) }).catch(() => {}); },
+      onFeedback: (rating, id) => { if (!id || !telemetryOn) return; fetch(`${BACKEND}/feedback`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ answerId: id, rating, deviceId }) }).catch(() => {}); },
       onPrepare: prepareCourse,
       onFollowAsk: () => { // ask another — re-listen (voice) or open the type box
         followUpMode = false; stopSpeaking();
@@ -544,7 +576,7 @@
         const rms = Math.sqrt(sum / buf.length);
         const now = Date.now();
         if (rms > 7) { speechDetected = true; lastLoud = now; }
-        if (speechDetected && now - lastLoud > 1300) return fire();  // paused after speaking → send
+        if (speechDetected && now - lastLoud > vadSilence) return fire();  // paused after speaking → send
         if (!speechDetected && now - start > 7000) return fire();    // never spoke → give up
         if (now - start > 30000) return fire();                      // hard cap
       }, 120);
@@ -1183,7 +1215,7 @@
   function startHeartbeats() {
     setInterval(() => {
       const v = video();
-      if (!v || v.paused || !deviceId) return;
+      if (!v || v.paused || !deviceId || !telemetryOn) return;
       if (!course || !course.ingested || !lectureForVideo(getVideoId())) return;
       fetch(`${BACKEND}/heartbeat`, {
         method: "POST",
@@ -1208,7 +1240,7 @@
     document.addEventListener("yt-navigate-finish", onNavigate);
     document.addEventListener("keydown", (e) => {
       if (/input|textarea/i.test(e.target.tagName || "")) return;
-      if (e.shiftKey && (e.key === "A" || e.key === "a")) { e.preventDefault(); view && view.toggleType(); }
+      if (matchShortcut(e, shortcutKey)) { e.preventDefault(); view && view.toggleType(); }
       else if (e.key === "Escape" && active) { e.preventDefault(); endTurn(); }
     });
   }

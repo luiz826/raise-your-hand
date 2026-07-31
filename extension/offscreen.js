@@ -14,8 +14,17 @@ let handWasDown = true;
 let lastRaise = 0;
 let ticks = 0; // detection cycles, used to throttle debug messages
 let raisedStreak = 0; // consecutive frames the hand has been held up
-const RAISE_HOLD = 4; // must hold ~0.5s (4×120ms) → deliberate, not a passing gesture
-const RAISE_Y = 0.5;  // hand counts as "raised" when its palm is in the upper half of the frame
+let RAISE_HOLD = 4; // frames the hand must be held up (raised sensitivity, from settings)
+let RAISE_Y = 0.5;  // palm must be above this fraction of the frame height to count as "raised"
+function applySensitivity(level) {
+  if (level === "high") { RAISE_HOLD = 3; RAISE_Y = 0.58; }       // easier to trigger
+  else if (level === "low") { RAISE_HOLD = 6; RAISE_Y = 0.42; }   // fewer false triggers
+  else { RAISE_HOLD = 4; RAISE_Y = 0.5; }
+}
+try {
+  chrome.storage.local.get("ryhSensitivity", (r) => applySensitivity(r.ryhSensitivity));
+  chrome.storage.onChanged.addListener((c, area) => { if (area === "local" && c.ryhSensitivity) applySensitivity(c.ryhSensitivity.newValue); });
+} catch (_) {}
 
 function send(msg) {
   try { chrome.runtime.sendMessage(msg); } catch (_) {}

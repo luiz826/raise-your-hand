@@ -32,6 +32,8 @@
   select:hover{ border-color:var(--amber); }
   .btn{ font:inherit; font-weight:600; color:var(--amber-ink); background:#0c0f14; border:1px solid var(--line2); border-radius:9px; padding:8px 16px; cursor:pointer; }
   .btn:hover{ border-color:var(--amber); }
+  input[type=text]{ font:inherit; color:var(--ink); background:#0c0f14; border:1px solid var(--line2); border-radius:9px; padding:8px 12px; min-width:210px; }
+  input[type=text]:focus{ outline:none; border-color:var(--amber); }
   /* switch */
   .sw{ position:relative; width:44px; height:26px; flex:none; }
   .sw input{ position:absolute; inset:0; opacity:0; margin:0; cursor:pointer; }
@@ -133,6 +135,18 @@
           <div class="txt"><div class="name">Send a screenshot with the first question</div><div class="desc">Gives the assistant what's on the slide for visual context.</div></div>
           <label class="sw"><input type="checkbox" id="capture"><span class="track"></span></label>
         </div>
+        <div class="row">
+          <div class="txt"><div class="name">Hand-raise sensitivity</div><div class="desc">How readily a raised hand triggers. Lower = fewer false triggers.</div></div>
+          <select id="sensitivity" aria-label="Sensitivity">
+            <option value="low">Low</option>
+            <option value="normal">Normal</option>
+            <option value="high">High</option>
+          </select>
+        </div>
+        <div class="row">
+          <div class="txt"><div class="name">Send anonymous usage &amp; feedback</div><div class="desc">Helps improve answers. Question text is not stored.</div></div>
+          <label class="sw"><input type="checkbox" id="telemetry"><span class="track"></span></label>
+        </div>
       </div>
     </section>
 
@@ -146,6 +160,36 @@
             <option value="bottom">Bottom (lower third)</option>
             <option value="left">Left</option>
           </select>
+        </div>
+        <div class="row">
+          <div class="txt"><div class="name">Answer text size</div><div class="desc">Font size of the answer text.</div></div>
+          <select id="font" aria-label="Text size">
+            <option value="s">Small</option>
+            <option value="m">Normal</option>
+            <option value="l">Large</option>
+          </select>
+        </div>
+        <div class="row">
+          <div class="txt"><div class="name">Type shortcut</div><div class="desc">Keyboard shortcut to open the type box on a lecture. Click to change.</div></div>
+          <button id="shortcut" class="btn">Shift + A</button>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>Advanced</h2>
+      <div class="card">
+        <div class="row">
+          <div class="txt"><div class="name">How quickly speech is sent</div><div class="desc">Silence after you stop talking before the question goes out.</div></div>
+          <select id="vad" aria-label="Send speed">
+            <option value="900">Fast</option>
+            <option value="1300">Normal</option>
+            <option value="1800">Relaxed</option>
+          </select>
+        </div>
+        <div class="row">
+          <div class="txt"><div class="name">Server address</div><div class="desc">Point the extension at your own server. Blank = default.</div></div>
+          <input id="server" type="text" placeholder="https://…" spellcheck="false" aria-label="Server address">
         </div>
       </div>
     </section>
