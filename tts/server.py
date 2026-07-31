@@ -39,14 +39,16 @@ BASE = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/"
 PORT = int(os.environ.get("RYH_TTS_PORT", "8788"))
 HOST = os.environ.get("RYH_VOICE_HOST", "127.0.0.1")  # 0.0.0.0 in Docker so Caddy can reach it
 MIME = {"mp3": "audio/mpeg", "wav": "audio/wav", "opus": "audio/ogg", "aac": "audio/aac", "flac": "audio/flac"}.get(FMT, "audio/mpeg")
+VOICES = {"alloy", "ash", "ballad", "coral", "echo", "fable", "onyx", "nova", "sage", "shimmer", "verse"}  # per-request voice allowlist
 
 if not API_KEY:
     sys.stderr.write("WARNING: OPENAI_API_KEY not set — /tts will fail until it is.\n")
 print(f"TTS ready → POST http://{HOST}:{PORT}/tts  (OpenAI {MODEL}, voice {VOICE})", flush=True)
 
 
-def synth(text: str) -> bytes:
-    payload = {"model": MODEL, "voice": VOICE, "input": text[:4000], "response_format": FMT}
+def synth(text: str, voice: str | None = None) -> bytes:
+    v = voice if voice in VOICES else VOICE
+    payload = {"model": MODEL, "voice": v, "input": text[:4000], "response_format": FMT}
     if INSTRUCTIONS:
         payload["instructions"] = INSTRUCTIONS
     req = urllib.request.Request(
@@ -106,7 +108,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._cors()
                 self.end_headers()
                 return
-            audio = synth(text)
+            audio = synth(text, (body.get("voice") or "").strip() or None)
             self.send_response(200)
             self._cors()
             self.send_header("Content-Type", MIME)

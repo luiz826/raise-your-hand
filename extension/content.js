@@ -48,6 +48,11 @@
   let followUpMode = false;  // listening for a "any other questions?" reply, not a fresh question
   let voiceTurn = false;     // this question came in by voice (→ voice follow-up) vs typed (→ buttons)
   let ignoreDictation = false; // drop a dictation result cancelled by a follow-up button
+  // --- user settings (options page → chrome.storage; applied live) ---
+  let ttsVoice = "alloy"; // OpenAI TTS voice
+  let gestureOn = true;   // webcam hand-raise detection
+  let captureOn = true;   // send a screenshot on the first question of a session
+  let panelPos = "right"; // answer panel position: right | bottom | left
   let turnActive = false;    // suspend hand detection while a turn runs
   let recognition = null;
   let finalTranscript = "";
@@ -79,12 +84,42 @@
     };
     try {
       if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.local) {
-        chrome.storage.local.get(["ryhLang", "ryhSpeak"], (r) => { sttLang = r.ryhLang || fromNav(); if (typeof r.ryhSpeak === "boolean") speakAnswers = r.ryhSpeak; if (view) { view.setLang(sttLang); view.setSpeak(speakAnswers); view.setEscapeLabel(langEntry().resume); } });
+        chrome.storage.local.get(["ryhLang", "ryhSpeak", "ryhVoice", "ryhGesture", "ryhCapture", "ryhPanel"], (r) => {
+          sttLang = r.ryhLang || fromNav();
+          if (typeof r.ryhSpeak === "boolean") speakAnswers = r.ryhSpeak;
+          if (r.ryhVoice) ttsVoice = r.ryhVoice;
+          if (typeof r.ryhGesture === "boolean") gestureOn = r.ryhGesture;
+          if (typeof r.ryhCapture === "boolean") captureOn = r.ryhCapture;
+          if (r.ryhPanel) panelPos = r.ryhPanel;
+          applyPrefs();
+        });
         return;
       }
     } catch (_) {}
     sttLang = fromNav();
-    if (view) view.setLang(sttLang);
+    applyPrefs();
+  }
+  function applyPrefs() {
+    if (!view) return;
+    view.setLang(sttLang);
+    view.setSpeak(speakAnswers);
+    view.setEscapeLabel(langEntry().resume);
+    view.setPanel(panelPos);
+    view.setGesture(gestureOn);
+    if (!gestureOn && handRaiseOn) stopHandRaise();
+  }
+  // Live-apply settings changed on the options page (or the in-page dock).
+  if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.onChanged) {
+    chrome.storage.onChanged.addListener((changes, area) => {
+      if (area !== "local") return;
+      if (changes.ryhLang) sttLang = changes.ryhLang.newValue || sttLang;
+      if (changes.ryhSpeak) speakAnswers = !!changes.ryhSpeak.newValue;
+      if (changes.ryhVoice) ttsVoice = changes.ryhVoice.newValue || ttsVoice;
+      if (changes.ryhGesture) gestureOn = !!changes.ryhGesture.newValue;
+      if (changes.ryhCapture) captureOn = !!changes.ryhCapture.newValue;
+      if (changes.ryhPanel) panelPos = changes.ryhPanel.newValue || "right";
+      applyPrefs();
+    });
   }
 
   // ---- dom helpers ----
@@ -168,6 +203,10 @@
         .escape::before{ content:"■"; color:#f0b6a0; font-size:10px; }
         .escape:hover{ border-color:var(--amber); }
         .layer:not([data-state="idle"]) .escape{ display:inline-flex; }
+        /* answer panel position (default: right, styled above) */
+        .layer[data-panel="left"] .answer{ right:auto; left:14px; transform:translateX(-16px); }
+        .layer[data-panel="bottom"] .answer{ top:auto; right:0; left:0; bottom:0; width:auto; max-width:none; max-height:40vh; border-radius:16px 16px 0 0; transform:translateY(16px); }
+        .layer.no-gesture .dock .start{ display:none !important; }
         .answer .who .stopspk{ display:none; margin-left:10px; font-size:11px; font-weight:600; color:#f0b6a0; background:#2a151566; border:1px solid #a5432f88; border-radius:999px; padding:2px 10px; cursor:pointer; pointer-events:auto; letter-spacing:0; text-transform:none; }
         .answer .who .stopspk:hover{ background:#a5432f66; border-color:#f0b6a0; }
         .layer.speaking .answer .who .stopspk{ display:inline-block; }
@@ -201,7 +240,7 @@
 
         .layer[data-state="listening"] .scrim, .layer[data-state="thinking"] .scrim{ opacity:1; }
         .layer[data-state="listening"] .listen, .layer[data-state="thinking"] .listen{ opacity:1; transform:translate(-50%,-50%) scale(1); }
-        .layer[data-state="answer"] .answer{ opacity:1; transform:translateX(0); pointer-events:auto; }
+        .layer[data-state="answer"] .answer{ opacity:1; transform:none; pointer-events:auto; }
         .layer.armed[data-state="idle"] .cue{ opacity:1; transform:translate(-50%,0); }
 
         @keyframes breathe{ 0%,100%{ transform:scale(1); opacity:.5 } 50%{ transform:scale(1.34); opacity:0 } }
@@ -330,6 +369,8 @@
       setListeningUI(on) { layer.classList.toggle("live", on); },
       setSpeaking(on) { layer.classList.toggle("speaking", on); },
       setEscapeLabel(text) { const e = q(".escape .etx"); if (e) e.textContent = text; },
+      setPanel(pos) { layer.dataset.panel = pos || "right"; },
+      setGesture(on) { layer.classList.toggle("no-gesture", !on); },
       setSpeak(on) { const b = q(".speak"); if (!b) return; b.textContent = on ? "🔊" : "🔇"; b.classList.toggle("off", !on); b.title = on ? "Professor speaks (on — click to mute)" : "Professor speaks (off — click to enable)"; },
       toggleType(force) {
         const show = force === undefined ? !layer.classList.contains("typing") : force;
@@ -576,6 +617,7 @@
   // here we start/stop it via the service worker and react to its messages.
   function toggleHandRaise() {
     if (handRaiseOn) { stopHandRaise(); return; }
+    if (!gestureOn) return view && view.showError("Webcam hand-raise is off in Settings — use 🎤 or press ⇧A.");
     if (typeof chrome === "undefined" || !chrome.runtime || !chrome.runtime.sendMessage) {
       return view && view.showError("Hand-raise needs the installed extension (not injection).");
     }
@@ -751,8 +793,7 @@
 
   // Synthesize one sentence → object URL (null if the turn was superseded).
   function ttsFetch(sentence, token) {
-    const { voice, ttsLang } = langEntry();
-    return fetch(`${TTS_BACKEND}/tts`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: sentence, voice, lang: ttsLang }) })
+    return fetch(`${TTS_BACKEND}/tts`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: sentence, voice: ttsVoice }) })
       .then((r) => (r.ok ? r.blob() : Promise.reject(new Error("tts"))))
       .then((blob) => (token === speechToken ? URL.createObjectURL(blob) : null));
   }
@@ -845,6 +886,7 @@
 
   // ---- visual questions: ask the background worker to capture the tab frame ----
   function captureFrame() {
+    if (!captureOn) return Promise.resolve(null); // screenshot disabled in settings
     return new Promise((resolve) => {
       try {
         if (typeof chrome === "undefined" || !chrome.runtime || !chrome.runtime.sendMessage) return resolve(null);

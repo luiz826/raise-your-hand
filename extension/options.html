@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Raise Your Hand — Settings</title>
+<style>
+  :root{
+    --bg:#0b0d11; --card:#12151b; --line:#ffffff14; --line2:#ffffff22;
+    --ink:#eee8dc; --dim:#9a958a; --amber:#e6a94d; --amber-ink:#f2c579;
+    --serif:'Charter','Iowan Old Style','Palatino Linotype',Georgia,serif;
+  }
+  *{ box-sizing:border-box; }
+  body{ margin:0; background:var(--bg); color:var(--ink);
+    font-family:ui-sans-serif,-apple-system,'Segoe UI',Roboto,sans-serif; font-size:15px; line-height:1.5;
+    background-image:radial-gradient(120% 80% at 100% -10%, #e6a94d12, #0000 55%); }
+  .wrap{ max-width:640px; margin:0 auto; padding:48px 24px 80px; }
+  header{ display:flex; align-items:center; gap:12px; margin-bottom:6px; }
+  header .mark{ font-size:26px; }
+  h1{ font-family:var(--serif); font-size:26px; font-weight:600; margin:0; letter-spacing:-.01em; }
+  .sub{ color:var(--dim); margin:0 0 34px; font-size:14px; }
+  section{ margin:26px 0; }
+  h2{ font-size:12px; letter-spacing:.14em; text-transform:uppercase; color:var(--amber); font-weight:700; margin:0 0 10px; }
+  .card{ background:var(--card); border:1px solid var(--line); border-radius:14px; overflow:hidden; }
+  .row{ display:flex; align-items:center; gap:16px; padding:15px 18px; border-top:1px solid var(--line); }
+  .row:first-child{ border-top:none; }
+  .row .txt{ flex:1; min-width:0; }
+  .row .name{ font-weight:600; }
+  .row .desc{ color:var(--dim); font-size:13px; margin-top:2px; }
+  select{ font:inherit; font-weight:600; color:var(--ink); background:#0c0f14; border:1px solid var(--line2);
+    border-radius:9px; padding:8px 12px; cursor:pointer; min-width:150px; }
+  select:hover{ border-color:var(--amber); }
+  /* switch */
+  .sw{ position:relative; width:44px; height:26px; flex:none; }
+  .sw input{ position:absolute; inset:0; opacity:0; margin:0; cursor:pointer; }
+  .sw .track{ position:absolute; inset:0; background:#2a2e36; border-radius:999px; transition:background .18s ease; }
+  .sw .track::after{ content:""; position:absolute; top:3px; left:3px; width:20px; height:20px; border-radius:50%;
+    background:#efe9de; transition:transform .18s ease; box-shadow:0 1px 3px #0006; }
+  .sw input:checked + .track{ background:var(--amber); }
+  .sw input:checked + .track::after{ transform:translateX(18px); }
+  .sw input:focus-visible + .track{ outline:2px solid var(--amber); outline-offset:2px; }
+  .saved{ position:fixed; bottom:22px; left:50%; transform:translate(-50%,14px); opacity:0;
+    background:#12351d; border:1px solid #2f7a44; color:#bfe9c9; font-size:13px; font-weight:600;
+    padding:8px 16px; border-radius:999px; transition:opacity .25s, transform .25s; pointer-events:none; }
+  .saved.show{ opacity:1; transform:translate(-50%,0); }
+  .foot{ color:var(--dim); font-size:12px; margin-top:30px; text-align:center; }
+  @media (prefers-color-scheme:light){
+    :root{ --bg:#f6f4ef; --card:#fff; --line:#00000012; --line2:#00000022; --ink:#221f1a; --dim:#6c675e; }
+    .sw .track{ background:#cfcabf; }
+  }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <header><span class="mark">✋</span><h1>Raise Your Hand</h1></header>
+    <p class="sub">Settings — changes apply immediately to open lectures.</p>
+
+    <section>
+      <h2>Voice &amp; language</h2>
+      <div class="card">
+        <div class="row">
+          <div class="txt"><div class="name">Language</div><div class="desc">Speech recognition, the spoken answer, and the reply language.</div></div>
+          <select id="lang" aria-label="Language">
+            <option value="en-US">English</option>
+            <option value="pt-BR">Português (Brasil)</option>
+          </select>
+        </div>
+        <div class="row">
+          <div class="txt"><div class="name">Speak answers aloud</div><div class="desc">Read the professor's answer out loud. Off = text only.</div></div>
+          <label class="sw"><input type="checkbox" id="speak"><span class="track"></span></label>
+        </div>
+        <div class="row">
+          <div class="txt"><div class="name">Professor's voice</div><div class="desc">Which voice reads the answers.</div></div>
+          <select id="voice" aria-label="Voice">
+            <option value="alloy">Alloy (neutral)</option>
+            <option value="ash">Ash</option>
+            <option value="ballad">Ballad</option>
+            <option value="coral">Coral</option>
+            <option value="echo">Echo</option>
+            <option value="fable">Fable</option>
+            <option value="onyx">Onyx (deep)</option>
+            <option value="nova">Nova</option>
+            <option value="sage">Sage (calm)</option>
+            <option value="shimmer">Shimmer</option>
+            <option value="verse">Verse</option>
+          </select>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>Camera &amp; privacy</h2>
+      <div class="card">
+        <div class="row">
+          <div class="txt"><div class="name">Raise your hand with the webcam</div><div class="desc">Detect a raised hand via the camera. Off = ask with the mic button or ⇧A only.</div></div>
+          <label class="sw"><input type="checkbox" id="gesture"><span class="track"></span></label>
+        </div>
+        <div class="row">
+          <div class="txt"><div class="name">Send a screenshot with the first question</div><div class="desc">Gives the assistant what's on the slide for visual context.</div></div>
+          <label class="sw"><input type="checkbox" id="capture"><span class="track"></span></label>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>Appearance</h2>
+      <div class="card">
+        <div class="row">
+          <div class="txt"><div class="name">Answer panel position</div><div class="desc">Where the answer appears over the page.</div></div>
+          <select id="panel" aria-label="Panel position">
+            <option value="right">Right (over related videos)</option>
+            <option value="bottom">Bottom (lower third)</option>
+            <option value="left">Left</option>
+          </select>
+        </div>
+      </div>
+    </section>
+
+    <p class="foot">More options coming soon.</p>
+  </div>
+  <div class="saved" id="saved">Saved</div>
+  <script src="options.js"></script>
+</body>
+</html>
