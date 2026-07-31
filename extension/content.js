@@ -79,7 +79,7 @@
     };
     try {
       if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.local) {
-        chrome.storage.local.get(["ryhLang", "ryhSpeak"], (r) => { sttLang = r.ryhLang || fromNav(); if (typeof r.ryhSpeak === "boolean") speakAnswers = r.ryhSpeak; if (view) { view.setLang(sttLang); view.setSpeak(speakAnswers); } });
+        chrome.storage.local.get(["ryhLang", "ryhSpeak"], (r) => { sttLang = r.ryhLang || fromNav(); if (typeof r.ryhSpeak === "boolean") speakAnswers = r.ryhSpeak; if (view) { view.setLang(sttLang); view.setSpeak(speakAnswers); view.setEscapeLabel(langEntry().resume); } });
         return;
       }
     } catch (_) {}
@@ -136,14 +136,14 @@
         .said{ font-family:var(--serif); font-style:italic; font-size:clamp(15px,2vw,19px); color:#efe9de; text-align:center; max-width:32ch; min-height:1.4em; text-wrap:balance; text-shadow:0 1px 10px rgba(0,0,0,.6); }
         .lbl{ font-size:12px; letter-spacing:.14em; text-transform:uppercase; color:var(--amber); font-weight:600; }
 
-        .answer{ left:0; right:0; bottom:0; padding:clamp(18px,4vw,40px) clamp(20px,6vw,72px) clamp(20px,4vw,40px); display:flex; flex-direction:column; gap:11px; transform:translateY(10px);
-          background:linear-gradient(to top, rgba(8,10,13,.96) 0%, rgba(8,10,13,.9) 58%, rgba(8,10,13,.62) 86%, rgba(8,10,13,0) 100%); backdrop-filter:blur(4px); }
+        .answer{ top:70px; right:14px; width:min(400px,40vw); max-height:calc(100vh - 150px); padding:18px 20px; display:flex; flex-direction:column; gap:10px; transform:translateX(16px);
+          background:rgba(8,10,13,.95); border:1px solid #ffffff22; border-radius:16px; backdrop-filter:blur(12px); box-shadow:0 24px 60px -24px #000; overflow:hidden; }
         .answer .who{ display:flex; align-items:center; gap:9px; font-size:11px; letter-spacing:.14em; text-transform:uppercase; color:var(--amber); font-weight:600; }
         .answer .who .spk{ display:inline-flex; gap:2px; align-items:flex-end; height:11px; }
         .answer .who .spk i{ width:2.5px; height:5px; background:var(--amber); border-radius:1px; animation:eq .9s ease-in-out infinite; }
         .answer .who .spk i:nth-child(2){animation-delay:.15s} .answer .who .spk i:nth-child(3){animation-delay:.3s}
-        .answer p{ font-family:var(--serif); font-size:clamp(17px,2.4vw,24px); line-height:1.42; color:#f6f1e8; max-width:40ch; text-wrap:pretty; letter-spacing:-.005em; margin:0; text-shadow:0 1px 10px rgba(0,0,0,.55);
-          max-height:34vh; overflow-y:auto; overscroll-behavior:contain; pointer-events:auto;
+        .answer p{ font-family:var(--serif); font-size:clamp(15px,1.7vw,19px); line-height:1.5; color:#f6f1e8; text-wrap:pretty; letter-spacing:-.005em; margin:0;
+          flex:1 1 auto; min-height:0; overflow-y:auto; overscroll-behavior:contain; pointer-events:auto;
           scrollbar-width:thin; scrollbar-color:#e6a94d80 transparent; }
         .answer p::-webkit-scrollbar{ width:6px; }
         .answer p::-webkit-scrollbar-thumb{ background:#e6a94d66; border-radius:3px; }
@@ -155,14 +155,19 @@
         .fb button:hover{ opacity:1; } .fb button:active{ transform:scale(.9); } .fb .picked{ opacity:1; }
         .answer.done .fb{ opacity:1; }
 
-        .followup{ left:50%; bottom:76px; transform:translate(-50%,8px); font-family:var(--serif); font-size:clamp(15px,2.1vw,20px); color:#efe9de; display:flex; gap:11px; align-items:center;
-          background:#0c0f14cc; border:1px solid #ffffff1c; backdrop-filter:blur(6px); padding:9px 18px; border-radius:999px; box-shadow:0 10px 28px -14px #000; text-shadow:0 1px 8px rgba(0,0,0,.5); }
-        .followup .mini{ display:inline-flex; gap:3px; } .followup .mini i{ width:3px; height:9px; background:var(--amber); border-radius:2px; animation:eq 1s ease-in-out infinite; }
-        .followup .mini i:nth-child(2){animation-delay:.15s} .followup .mini i:nth-child(3){animation-delay:.3s}
-        .followup button, .answer .fmore button{ font-family:ui-sans-serif,-apple-system,sans-serif; font-size:13px; font-weight:600; color:#efe9de; background:#ffffff14; border:1px solid #ffffff2e; border-radius:999px; padding:6px 14px; cursor:pointer; pointer-events:auto; transition:border-color .2s ease, background .2s ease; }
-        .followup button:hover, .answer .fmore button:hover{ border-color:var(--amber); background:#e6a94d24; }
-        .followup .fresume, .answer .fmore .fresume{ color:var(--amber-ink); }
-        .answer .fmore{ display:flex; gap:8px; margin-left:auto; }
+        .answer .cardfollow{ display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
+        .answer .cardfollow:empty{ display:none; }
+        .answer .cardfollow .fq{ font-family:var(--serif); font-size:15px; color:#efe9de; margin-right:2px; }
+        .answer .cardfollow .mini{ display:inline-flex; gap:3px; align-items:flex-end; height:12px; } .answer .cardfollow .mini i{ width:3px; height:9px; background:var(--amber); border-radius:2px; animation:eq 1s ease-in-out infinite; }
+        .answer .cardfollow .mini i:nth-child(2){animation-delay:.15s} .answer .cardfollow .mini i:nth-child(3){animation-delay:.3s}
+        .answer .cardfollow button{ font-family:ui-sans-serif,-apple-system,sans-serif; font-size:13px; font-weight:600; color:#efe9de; background:#ffffff14; border:1px solid #ffffff2e; border-radius:999px; padding:6px 13px; cursor:pointer; pointer-events:auto; transition:border-color .2s ease, background .2s ease; }
+        .answer .cardfollow button:hover{ border-color:var(--amber); background:#e6a94d24; }
+        .answer .cardfollow .fresume{ color:var(--amber-ink); margin-left:auto; }
+        .escape{ position:absolute; top:70px; left:14px; display:none; align-items:center; gap:6px; pointer-events:auto;
+          font-family:ui-sans-serif,-apple-system,sans-serif; font-size:13px; font-weight:600; color:#efe9de; background:#0c0f14e0; border:1px solid #ffffff26; border-radius:999px; padding:7px 14px; cursor:pointer; backdrop-filter:blur(6px); box-shadow:0 8px 24px -12px #000; }
+        .escape::before{ content:"■"; color:#f0b6a0; font-size:10px; }
+        .escape:hover{ border-color:var(--amber); }
+        .layer:not([data-state="idle"]) .escape{ display:inline-flex; }
         .answer .who .stopspk{ display:none; margin-left:10px; font-size:11px; font-weight:600; color:#f0b6a0; background:#2a151566; border:1px solid #a5432f88; border-radius:999px; padding:2px 10px; cursor:pointer; pointer-events:auto; letter-spacing:0; text-transform:none; }
         .answer .who .stopspk:hover{ background:#a5432f66; border-color:#f0b6a0; }
         .layer.speaking .answer .who .stopspk{ display:inline-block; }
@@ -195,10 +200,8 @@
         .typeline input:focus{ border-color:var(--amber); }
 
         .layer[data-state="listening"] .scrim, .layer[data-state="thinking"] .scrim{ opacity:1; }
-        .layer[data-state="answer"] .lower, .layer[data-state="followup"] .lower{ opacity:1; }
         .layer[data-state="listening"] .listen, .layer[data-state="thinking"] .listen{ opacity:1; transform:translate(-50%,-50%) scale(1); }
-        .layer[data-state="answer"] .answer{ opacity:1; transform:translateY(0); }
-        .layer[data-state="followup"] .followup{ opacity:1; transform:translate(-50%,0); }
+        .layer[data-state="answer"] .answer{ opacity:1; transform:translateX(0); pointer-events:auto; }
         .layer.armed[data-state="idle"] .cue{ opacity:1; transform:translate(-50%,0); }
 
         @keyframes breathe{ 0%,100%{ transform:scale(1); opacity:.5 } 50%{ transform:scale(1.34); opacity:0 } }
@@ -208,9 +211,9 @@
       </style>
       <div class="layer" data-state="idle">
         <div class="scrim"></div><div class="lower"></div>
+        <button class="escape"><span class="etx"></span></button>
         <div class="el cue">✋ Raise your hand to ask <span class="key">⇧A</span></div>
         <div class="el listen">
-          <div class="lbl">Listening</div>
           <div class="ring"><span class="dot"></span></div>
           <div class="wave"><i></i><i></i><i></i><i></i><i></i><i></i></div>
           <div class="said"></div>
@@ -221,10 +224,9 @@
           <div class="foot">
             <span class="meta"></span>
             <span class="fb"><button data-r="1" title="Helpful">👍</button><button data-r="-1" title="Not helpful">👎</button></span>
-            <span class="fmore"></span>
           </div>
+          <div class="cardfollow"></div>
         </div>
-        <div class="el followup"></div>
         <div class="err"></div><div class="statusline"></div>
         <div class="typeline"><input placeholder="Type your question…" aria-label="Type your question"></div>
         <div class="dock">
@@ -240,7 +242,7 @@
     const layer = root.querySelector(".layer");
     const q = (s) => root.querySelector(s);
     const said = q(".said"), answerEl = q(".answer"), textEl = q(".text"), metaEl = q(".meta"),
-          fbEl = q(".fb"), followEl = q(".followup"), errEl = q(".err"), statusEl = q(".statusline"),
+          fbEl = q(".fb"), errEl = q(".err"), statusEl = q(".statusline"),
           startBtn = q(".start"), langSel = q(".lang"), typeInput = q(".typeline input");
     let answerId = null, errTimer = null, dockTimer = null;
 
@@ -259,6 +261,7 @@
     langSel.onchange = () => h.onLang?.(langSel.value);
     q(".speak").onclick = () => h.onToggleSpeak?.();
     q(".stopspk").onclick = () => h.onStop?.();
+    q(".escape").onclick = () => h.onEscape?.();
     // While the type box is open, hide every keystroke from YouTube — its hotkeys
     // (space, k, f, digits, arrows) fire on document/window and never see our shadow
     // input, so they'd act on the video. A window-capture listener runs before
@@ -289,7 +292,7 @@
       beginAnswer() {
         textEl.textContent = ""; metaEl.textContent = ""; answerEl.classList.remove("done");
         fbEl.dataset.done = ""; fbEl.querySelectorAll(".picked").forEach((b) => b.classList.remove("picked"));
-        q(".fmore").innerHTML = ""; // drop any follow-up buttons from the previous answer
+        q(".cardfollow").innerHTML = ""; // drop any follow-up controls from the previous answer
         layer.dataset.state = "answer";
       },
       appendAnswer(delta) { if (layer.dataset.state !== "answer") this.beginAnswer(); textEl.textContent += delta; }, // stay at the top so the reader starts at the beginning
@@ -308,21 +311,16 @@
         answerEl.classList.add("done");
         textEl.scrollTop = 0; // show the start of the answer for reading
       },
-      // Voice mode: a pill with the prompt + a listening indicator + manual buttons
-      // (so the learner can click if the "yes/no" mishears).
-      showFollowup({ text, listening, askLabel, resumeLabel }) {
+      // Follow-up controls live inside the answer card (the right panel stays visible):
+      // an optional prompt + listening indicator + Ask-another / Resume buttons.
+      showFollowup({ prompt, listening, askLabel, resumeLabel }) {
+        const fq = prompt ? `<span class="fq">${prompt}</span>` : "";
         const mini = listening ? `<span class="mini"><i></i><i></i><i></i></span>` : "";
-        followEl.innerHTML = `<span class="fq">${text}</span>${mini}<button class="fask">${askLabel}</button><button class="fresume">${resumeLabel}</button>`;
-        followEl.querySelector(".fask").onclick = () => h.onFollowAsk?.();
-        followEl.querySelector(".fresume").onclick = () => h.onFollowResume?.();
-        layer.dataset.state = "followup";
-      },
-      // Silent mode: keep the answer on screen; add buttons to its footer.
-      showAnswerFollowup({ askLabel, resumeLabel }) {
-        const el = q(".fmore");
-        el.innerHTML = `<button class="fask">${askLabel}</button><button class="fresume">${resumeLabel}</button>`;
+        const el = q(".cardfollow");
+        el.innerHTML = `${fq}${mini}<button class="fask">${askLabel}</button><button class="fresume">${resumeLabel}</button>`;
         el.querySelector(".fask").onclick = () => h.onFollowAsk?.();
         el.querySelector(".fresume").onclick = () => h.onFollowResume?.();
+        layer.dataset.state = "answer"; // keep the card visible
       },
       showError(msg) { errEl.textContent = msg; layer.classList.remove("status"); layer.classList.add("err"); clearTimeout(errTimer); errTimer = setTimeout(() => layer.classList.remove("err"), 5000); },
       showStatus(text) { statusEl.textContent = text; layer.classList.add("status"); },
@@ -331,6 +329,7 @@
       setReady(kind) { layer.classList.toggle("ready", kind === "ready"); layer.classList.toggle("can-prepare", kind === "prepare"); },
       setListeningUI(on) { layer.classList.toggle("live", on); },
       setSpeaking(on) { layer.classList.toggle("speaking", on); },
+      setEscapeLabel(text) { const e = q(".escape .etx"); if (e) e.textContent = text; },
       setSpeak(on) { const b = q(".speak"); if (!b) return; b.textContent = on ? "🔊" : "🔇"; b.classList.toggle("off", !on); b.title = on ? "Professor speaks (on — click to mute)" : "Professor speaks (off — click to enable)"; },
       toggleType(force) {
         const show = force === undefined ? !layer.classList.contains("typing") : force;
@@ -349,7 +348,7 @@
     view = createView(host, {
       onToggleHandRaise: toggleHandRaise,
       onTapToTalk: () => startTurn(),
-      onLang: (code) => { sttLang = code; try { chrome.storage && chrome.storage.local && chrome.storage.local.set({ ryhLang: code }); } catch (_) {} },
+      onLang: (code) => { sttLang = code; if (view) view.setEscapeLabel(langEntry().resume); try { chrome.storage && chrome.storage.local && chrome.storage.local.set({ ryhLang: code }); } catch (_) {} },
       onType: (text) => { active = true; voiceTurn = false; const v = video(); if (v && !v.paused) v.pause(); maybeResetSession(); ask(text); },
       onSeek: (s) => { const v = video(); if (v) { v.currentTime = s; v.play(); } endTurn(); },
       onFeedback: (rating, id) => { if (!id) return; fetch(`${BACKEND}/feedback`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ answerId: id, rating, deviceId }) }).catch(() => {}); },
@@ -359,11 +358,8 @@
         if (voiceTurn) { if (!listening) toggleDictation(); }
         else if (view) view.toggleType(true);
       },
-      onFollowResume: () => { // stop everything and play on
-        followUpMode = false; stopSpeaking();
-        if (listening) { ignoreDictation = true; stopDictation(); }
-        resumeVideo();
-      },
+      onFollowResume: bailToVideo, // stop everything and play on
+      onEscape: bailToVideo,       // always-available escape hatch (same behavior)
       onStop: () => { stopSpeaking(); askFollowUp(false); }, // cut the spoken answer short, go to the follow-up
       onToggleSpeak: () => {
         speakAnswers = !speakAnswers;
@@ -374,6 +370,7 @@
     });
     view.mountLangs(LANGS.map((l) => ({ code: l.code, label: l.label })), sttLang);
     view.setSpeak(speakAnswers);
+    view.setEscapeLabel(langEntry().resume);
   }
 
   function refreshReady() {
@@ -442,7 +439,9 @@
 
   function setListeningUI(on) {
     listening = on;
-    if (view) { view.setListeningUI(on); if (on) { view.setState("listening"); view.setTranscript(""); } }
+    // During the follow-up, listening happens inside the answer card — don't switch to
+    // the centered listening ring (which would hide the card and its buttons).
+    if (view) { view.setListeningUI(on); if (on && !followUpMode) { view.setState("listening"); view.setTranscript(""); } }
   }
 
   // Shared post-transcription handling for both engines.
@@ -772,6 +771,10 @@
     if (token !== speechToken) return;
     const clean = String(text).replace(/[*`]/g, "").replace(/\p{Extended_Pictographic}/gu, "").replace(/\s+/g, " ").trim();
     if (clean) speechQueue.push(clean);
+    // If a sentence arrives WHILE the current one is playing and nothing is prefetching,
+    // synthesize it right away so it's ready when the current clip ends — this closes the
+    // pause at the first '.' (the 2nd sentence often hadn't arrived yet when the 1st started).
+    if (speechBusy && !speechNext && speechQueue.length > 0) speechNext = ttsFetch(speechQueue[0], token);
     speechPump(token);
   }
   function speechEnd(token) {
@@ -818,20 +821,26 @@
     if (view) view.setSpeaking(false);
     const L = langEntry();
     if (voiceTurn && speakAnswers) {
-      // Voice question + speaking: pill + buttons + speak the prompt, then listen.
-      if (view) view.showFollowup({ text: L.followUp, listening: true, askLabel: L.askMore, resumeLabel: L.resume });
-      followUpMode = true;
+      // Voice: prompt + listening indicator + buttons in the answer card, then listen.
+      followUpMode = true; // set before listening so the mic keeps the card (not the centered ring)
+      if (view) view.showFollowup({ prompt: L.followUp, listening: true, askLabel: L.askMore, resumeLabel: L.resume });
       if (speakPrompt) speak(L.followUp, () => { if (followUpMode && !listening) toggleDictation(); });
       else if (!listening) toggleDictation(); // came from Stop — skip re-speaking, go straight to listening
     } else {
-      // Typed question (or muted): keep the answer visible, offer buttons — never open the mic.
-      if (view) view.showAnswerFollowup({ askLabel: L.askMore, resumeLabel: L.resume });
+      // Typed (or muted): buttons only, never open the mic.
+      if (view) view.showFollowup({ prompt: null, listening: false, askLabel: L.askMore, resumeLabel: L.resume });
     }
   }
   function resumeVideo() {
     const v = video();
     if (v && v.paused) v.play();
     endTurn();
+  }
+  function bailToVideo() { // escape hatch: stop mic + speech, resume the video
+    followUpMode = false;
+    if (listening) { ignoreDictation = true; stopDictation(); }
+    stopSpeaking();
+    resumeVideo();
   }
 
   // ---- visual questions: ask the background worker to capture the tab frame ----
