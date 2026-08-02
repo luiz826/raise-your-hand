@@ -992,8 +992,7 @@
           answerStyle, spoilers,
         }),
       });
-      if (!res.ok || !res.body) throw new Error(`backend HTTP ${res.status}`);
-
+      if (!res.ok || !res.body) throw httpError(res);
       const reader = res.body.getReader();
       const dec = new TextDecoder();
       let buf = "";
@@ -1032,7 +1031,7 @@
         }
       }
     } catch (err) {
-      if (view) view.showError(`Couldn't reach the backend — is it running on ${BACKEND}?`);
+      if (view) view.showError(err.status === 429 ? RATE_LIMIT_MSG : `Couldn't reach the backend — is it running on ${BACKEND}?`);
     } finally {
       if (answer) history.push({ question: q, answer });
       busy = false;
@@ -1157,7 +1156,7 @@
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ playlistId: list, title: pl.title, videos }),
       });
-      if (!res.ok || !res.body) throw new Error(`backend HTTP ${res.status}`);
+      if (!res.ok || !res.body) throw httpError(res);
       const reader = res.body.getReader();
       const dec = new TextDecoder();
       let buf = "";
@@ -1181,7 +1180,7 @@
         }
       }
     } catch (err) {
-      view.showError(`Couldn't prepare: ${err.message}`);
+      view.showError(`Couldn't prepare: ${err.status === 429 ? "too many courses prepared recently — try again in about an hour." : err.message}`);
     } finally {
       preparing = false;
       refreshReady();

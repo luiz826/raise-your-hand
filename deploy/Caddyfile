@@ -1,7 +1,9 @@
 # One domain, path-routed. Caddy fetches + renews a TLS cert automatically.
 # /tts and /stt go to the voice servers (rate-limited per client IP so nobody
-# can hammer the paid OpenAI voice endpoints); everything else (/ask, /course,
-# /ingest, /feedback, /heartbeat, /health) goes to the backend.
+# can hammer the paid OpenAI voice endpoints). /ingest and /ask are also
+# rate-limited: both spend Anthropic credits, and /ingest is public + expensive
+# (a full course build), so it's capped hard per IP. Everything else (/course,
+# /feedback, /heartbeat, /health) goes to the backend unthrottled.
 {
 	order rate_limit before reverse_proxy
 }
@@ -28,6 +30,26 @@
 			}
 		}
 		reverse_proxy stt:8789
+	}
+	handle /ingest* {
+		rate_limit {
+			zone ingest {
+				key {remote_host}
+				events 5
+				window 1h
+			}
+		}
+		reverse_proxy backend:8787
+	}
+	handle /ask* {
+		rate_limit {
+			zone ask {
+				key {remote_host}
+				events 30
+				window 1m
+			}
+		}
+		reverse_proxy backend:8787
 	}
 	handle {
 		reverse_proxy backend:8787
