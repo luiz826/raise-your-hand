@@ -20,7 +20,7 @@ import { acquireIngestSlot, rateLimit, releaseIngestSlot } from "./lib/guard";
 const PORT = Number(process.env.PORT ?? 8787);
 const HOST = process.env.HOST ?? "127.0.0.1"; // bind localhost by default; set 0.0.0.0 to expose
 const ALLOWED_ORIGIN = process.env.RYH_ALLOWED_ORIGIN ?? "*"; // lock to the extension origin on deploy
-const API_TOKEN = process.env.RYH_API_TOKEN ?? ""; // if set, /ingest requires Authorization: Bearer <token>
+const API_TOKEN = process.env.RYH_API_TOKEN ?? ""; // if set, a matching Bearer token bypasses the /ingest rate limit (maintainer batch ingests)
 const LOG_TEXT = process.env.RYH_LOG_TEXT !== "0"; // set 0 to omit question/answer text from telemetry
 const qaModel = resolveModel(QA_MODEL);
 
@@ -237,7 +237,7 @@ interface IngestBody {
   videos?: VideoData[];
 }
 
-async function handleIngest(res: http.ServerResponse, body: IngestBody, key: string) {
+async function handleIngest(res: http.ServerResponse, body: IngestBody, key: string, bypassRateLimit = false) {
   cors(res);
   res.writeHead(200, {
     "Content-Type": "application/x-ndjson",
@@ -261,7 +261,7 @@ async function handleIngest(res: http.ServerResponse, body: IngestBody, key: str
       emit({ type: "error", message: `playlist has ${videos.length} videos; MVP caps at ${MAX_INGEST_VIDEOS}` });
       return res.end();
     }
-    if (!rateLimit(`ingest:${key}`, INGEST_PER_HOUR, 3_600_000)) {
+    if (!bypassRateLimit && !rateLimit(`ingest:${key}`, INGEST_PER_HOUR, 3_600_000)) {
       emit({ type: "error", message: "Course-prep limit reached for now — try again later." });
       return res.end();
     }
@@ -331,11 +331,12 @@ const server = http.createServer(async (req, res) => {
       return handleAsk(res, body, clientKey(req));
     }
     if (req.method === "POST" && url.pathname === "/ingest") {
-      // Expensive (builds a course map via the LLM) — gate it behind RYH_API_TOKEN
-      // so only the maintainer can pre-ingest courses; end users use what's ready.
-      if (!checkToken(req)) return sendJson(res, 401, { error: "unauthorized" });
+      // Public: extension users prepare their own courses (self-service). Abuse
+      // is capped by the 40-video limit, MAX_CONCURRENT_INGESTS, per-IP rate
+      // limits here (INGEST_PER_HOUR) and in Caddy. A valid RYH_API_TOKEN
+      // bypasses the rate limit so the maintainer can batch-ingest.
       const body = await readBody(req, 32_000_000); // up to 40 transcripts
-      return handleIngest(res, body, clientKey(req));
+      return handleIngest(res, body, clientKey(req), checkToken(req));
     }
     if (req.method === "POST" && url.pathname === "/heartbeat") {
       const b = await readBody(req, 16_000);

@@ -28,7 +28,7 @@ The backend serves course maps from `data/`. Prepare them once (locally, via the
 ```bash
 rsync -av data/ user@your-vps:/path/to/raise-your-hand/data/
 ```
-(Or, on the server, curl `/ingest` with `Authorization: Bearer $RYH_API_TOKEN` — that endpoint is token-gated so only you can trigger the paid ingest.)
+(Anyone can prepare a course from the extension's "Prepare course" button — `/ingest` is public and rate-limited per IP. Passing `Authorization: Bearer $RYH_API_TOKEN` bypasses the rate limit, handy for batch-ingesting courses yourself.)
 
 ## 3. Launch
 From the repo root on the VPS:
