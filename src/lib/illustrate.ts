@@ -1,7 +1,8 @@
 // On-demand illustrations for the answer card's 🎨 button. The answer text +
-// course context go straight into an OpenAI gpt-image-1 prompt (low quality —
-// whiteboard sketches don't need more, ~$0.01/image); results are cached on
-// disk keyed by course+answer, so repeated clicks — from any user — are free.
+// course context go straight into an OpenAI gpt-image-1 prompt (quality
+// "medium": "low" garbles text labels — verified empirically; ~$0.04/image);
+// results are cached on disk keyed by course+answer, so repeated clicks —
+// from any user — are free.
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
@@ -31,12 +32,12 @@ export async function generateIllustration(opts: {
     "A clean educational whiteboard-style diagram for a university student, illustrating this explanation:",
     `"${opts.answer.slice(0, 800)}"`,
     `Context: lecture "${opts.lectureTitle}" from the course "${opts.courseTitle}".`,
-    `Style: hand-drawn black-marker sketch on white, simple shapes and arrows, at most 3-4 short text labels in ${opts.language}, no photorealism, no people, no watermark, no long sentences in the image.`,
+    `Style: hand-drawn black-marker sketch on white, simple shapes and arrows, at most 3-4 short text labels in ${opts.language}, every word spelled exactly right, any math notation kept minimal and standard, no photorealism, no people, no watermark, no long sentences in the image.`,
   ].join("\n");
   const res = await fetch("https://api.openai.com/v1/images/generations", {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${OPENAI_KEY}` },
-    body: JSON.stringify({ model: "gpt-image-1", prompt, size: "1024x1024", quality: "low" }),
+    body: JSON.stringify({ model: "gpt-image-1", prompt, size: "1024x1024", quality: "medium" }),
   });
   if (!res.ok) throw new Error(`image API HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`);
   const json = (await res.json()) as { data?: { b64_json?: string }[] };
