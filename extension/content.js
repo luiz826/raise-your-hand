@@ -42,6 +42,7 @@
   let view = null;           // the ambient overlay
   let active = false;        // a Q&A turn is engaged
   let busy = false;          // an /ask request is in flight
+  let illustrating = false;  // an /illustrate request is in flight
   let preparing = false;
   let listening = false;
   let speakAnswers = true;   // speak answers aloud — user toggle in the dock (persisted)
@@ -243,6 +244,8 @@
         .answer .meta{ font-size:12px; color:#8a857b; font-variant-numeric:tabular-nums; }
         .fb{ display:flex; gap:6px; opacity:0; transition:opacity .4s ease .3s; pointer-events:auto; }
         .fb button{ background:none; border:none; cursor:pointer; font-size:14px; opacity:.55; transition:opacity .2s, transform .1s; padding:2px; }
+        .fb button:disabled{ cursor:wait; opacity:.3; }
+        .answer .figure img{ display:block; width:100%; height:auto; border-radius:10px; margin-bottom:4px; }
         .fb button:hover{ opacity:1; } .fb button:active{ transform:scale(.9); } .fb .picked{ opacity:1; }
         .answer.done .fb{ opacity:1; }
 
@@ -318,7 +321,7 @@
           <p class="text"></p>
           <div class="foot">
             <span class="meta"></span>
-            <span class="fb"><button data-r="1" title="Helpful">👍</button><button data-r="-1" title="Not helpful">👎</button></span>
+            <span class="fb"><button class="illustrate" title="Draw an illustration of this answer">🎨</button><button data-r="1" title="Helpful">👍</button><button data-r="-1" title="Not helpful">👎</button></span>
           </div>
           <div class="cardfollow"></div>
         </div>
@@ -361,6 +364,7 @@
 
     startBtn.onclick = () => h.onToggleHandRaise?.();
     q(".prepare").onclick = () => h.onPrepare?.();
+    q(".illustrate").onclick = () => h.onIllustrate?.();
     q(".mic").onclick = () => h.onTapToTalk?.();
     q(".type").onclick = () => api.toggleType();
     langSel.onchange = () => h.onLang?.(langSel.value);
@@ -507,9 +511,12 @@
       beginAnswer() {
         textEl.textContent = ""; metaEl.textContent = ""; answerEl.classList.remove("done");
         fbEl.dataset.done = ""; fbEl.querySelectorAll(".picked").forEach((b) => b.classList.remove("picked"));
+        this.setIllustrating(false);
         q(".cardfollow").innerHTML = ""; // drop any follow-up controls from the previous answer
         layer.dataset.state = "answer";
       },
+      setIllustrating(on) { const b = q(".illustrate"); if (b) { b.disabled = !!on; b.textContent = on ? "⏳" : "🎨"; } },
+      addIllustration(url, alt) { const fig = document.createElement("div"); fig.className = "figure"; const img = document.createElement("img"); img.src = url; img.alt = alt || "illustration"; fig.append(img); textEl.append(fig); },
       appendAnswer(delta) { if (layer.dataset.state !== "answer") this.beginAnswer(); textEl.textContent += delta; }, // stay at the top so the reader starts at the beginning
       finishAnswer({ id, meta } = {}) {
         answerId = id || null;
@@ -562,6 +569,34 @@
       onLang: (code) => { sttLang = code; if (view) view.setEscapeLabel(langEntry().resume); try { chrome.storage && chrome.storage.local && chrome.storage.local.set({ ryhLang: code }); } catch (_) {} },
       onType: (text) => { active = true; voiceTurn = false; const v = video(); if (v && !v.paused) v.pause(); maybeResetSession(); ask(text); },
       onSeek: (s) => { const v = video(); if (v) { v.currentTime = s; v.play(); } endTurn(); },
+      onFrameRecall,
+      onIllustrate: async () => {
+        const last = history.length ? history[history.length - 1] : null;
+        if (!last || illustrating || !course || !course.ingested) return;
+        illustrating = true;
+        if (view) view.setIllustrating(true);
+        try {
+          const res = await fetch(`${BACKEND}/illustrate`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              playlistId: getPlaylistId(),
+              videoId: getVideoId(),
+              answer: last.answer,
+              answerLanguage: langEntry().name,
+            }),
+          });
+          if (!res.ok) throw httpError(res);
+          const j = await res.json();
+          if (!j.url) throw new Error("no image returned");
+          if (view) view.addIllustration(`${BACKEND}${j.url}`, last.question);
+        } catch (err) {
+          if (view) view.showError(err.status === 429 ? RATE_LIMIT_MSG : `Couldn't illustrate: ${err.message}`);
+        } finally {
+          illustrating = false;
+          if (view) view.setIllustrating(false);
+        }
+      },
       onFeedback: (rating, id) => { if (!id || !telemetryOn) return; fetch(`${BACKEND}/feedback`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ answerId: id, rating, deviceId }) }).catch(() => {}); },
       onPrepare: prepareCourse,
       onFollowAsk: () => { // ask another — re-listen (voice) or open the type box

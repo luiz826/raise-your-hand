@@ -16,6 +16,7 @@ import { resolveModel } from "./lib/provider";
 import { assembleSegments, loadVideo, runQA, type PriorTurn } from "./lib/agent";
 import { logEvent, newId } from "./lib/events";
 import { acquireIngestSlot, rateLimit, releaseIngestSlot } from "./lib/guard";
+import { generateIllustration, illustrationKey, illustrationPath } from "./lib/illustrate";
 
 const PORT = Number(process.env.PORT ?? 8787);
 const HOST = process.env.HOST ?? "127.0.0.1"; // bind localhost by default; set 0.0.0.0 to expose
@@ -33,6 +34,7 @@ const validId = (s: unknown, re: RegExp): s is string => typeof s === "string" &
 // Rate limits (per device id, falling back to IP).
 const ASK_PER_MIN = Number(process.env.RYH_ASK_PER_MIN ?? 30);
 const INGEST_PER_HOUR = Number(process.env.RYH_INGEST_PER_HOUR ?? 5);
+const ILLUSTRATE_PER_HOUR = Number(process.env.RYH_ILLUSTRATE_PER_HOUR ?? 10);
 const MAX_CONCURRENT_INGESTS = Number(process.env.RYH_MAX_INGESTS ?? 2);
 
 // Rate-limit by source IP — not the client-supplied deviceId (which can be
@@ -337,6 +339,43 @@ const server = http.createServer(async (req, res) => {
       // bypasses the rate limit so the maintainer can batch-ingest.
       const body = await readBody(req, 32_000_000); // up to 40 transcripts
       return handleIngest(res, body, clientKey(req), checkToken(req));
+    }
+    if (req.method === "GET" && url.pathname.startsWith("/illustrations/")) {
+      const p = illustrationPath(url.pathname.slice("/illustrations/".length).replace(/\.png$/, ""));
+      if (!p) return sendJson(res, 404, { error: "not found" });
+      cors(res);
+      res.writeHead(200, { "Content-Type": "image/png", "Cache-Control": "public, max-age=31536000, immutable" });
+      return fs.createReadStream(p).pipe(res);
+    }
+    if (req.method === "POST" && url.pathname === "/illustrate") {
+      // Paid image API (gpt-image-1) — cached by course+answer, rate-limited per IP.
+      if (!rateLimit(`ill:${clientKey(req)}`, ILLUSTRATE_PER_HOUR, 3_600_000)) {
+        return sendJson(res, 429, { error: "rate limited" });
+      }
+      const body = await readBody(req, 64_000);
+      const { playlistId, answer, answerLanguage } = body ?? {};
+      if (!validId(playlistId, PLAYLIST_RE) || typeof answer !== "string" || answer.trim().length < 20) {
+        return sendJson(res, 400, { error: "playlistId and answer (20+ chars) required" });
+      }
+      const course = loadCourse(playlistId);
+      if (!course) return sendJson(res, 404, { error: "course not prepared" });
+      const key = illustrationKey(playlistId, answer);
+      try {
+        const cached = illustrationPath(key);
+        if (!cached) {
+          const lecture = course.map.lectures.find((l) => l.videoId === body.videoId);
+          await generateIllustration({
+            key,
+            courseTitle: course.map.courseTitle,
+            lectureTitle: lecture?.title ?? "",
+            answer,
+            language: typeof answerLanguage === "string" ? answerLanguage : "English",
+          });
+        }
+        return sendJson(res, 200, { url: `/illustrations/${key}.png`, cached: !!cached });
+      } catch (err) {
+        return sendJson(res, 502, { error: err instanceof Error ? err.message : String(err) });
+      }
     }
     if (req.method === "POST" && url.pathname === "/heartbeat") {
       const b = await readBody(req, 16_000);
