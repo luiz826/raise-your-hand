@@ -82,13 +82,26 @@ async function start() {
   }
 }
 
-// "Hand raised" = the whole hand is held up high in the frame, the way you'd
-// raise it in class — NOT a particular finger pose. y grows downward, so a
-// smaller y is higher up. Landmark 9 is the base of the middle finger (~palm
-// centre); requiring the palm in the upper part of the frame ignores hands that
-// are just gesturing at chest/desk level while talking.
+// "Hand raised" = the deliberate classroom gesture: an OPEN palm held up high —
+// all four fingers clearly extended and the hand roughly upright. Just placing
+// any hand-shaped thing in the upper frame (a fist, one pointing finger, a hand
+// reaching for the mouse) must NOT count. y grows downward, so smaller y = higher.
+// Landmark map: 0 wrist; per finger [tip, pip, mcp] = [8,6,5] index, [12,10,9]
+// middle, [16,14,13] ring, [20,18,17] pinky; 9 ≈ palm centre.
 function isRaised(lm) {
-  return lm[9].y < RAISE_Y;
+  if (lm[9].y >= RAISE_Y) return false; // palm must be high in the frame
+  const wrist = lm[0];
+  const d = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+  // Each finger must be extended — rotation-invariant check: the tip sits
+  // clearly farther from the wrist (and from its own base) than the middle
+  // joint. A curled/folded finger fails both comparisons.
+  for (const [tip, pip, mcp] of [[8, 6, 5], [12, 10, 9], [16, 14, 13], [20, 18, 17]]) {
+    if (d(lm[tip], wrist) < d(lm[pip], wrist) * 1.15) return false;
+    if (d(lm[tip], lm[mcp]) < d(lm[pip], lm[mcp]) * 1.4) return false;
+  }
+  // Hand roughly upright: middle fingertip well above the wrist.
+  if (lm[12].y > lm[0].y - 0.12) return false;
+  return true;
 }
 
 function detect() {
@@ -114,7 +127,7 @@ function detect() {
 
   if (ticks % 7 === 0) {
     const palmY = hands.length > 0 ? hands[0][9].y.toFixed(2) : "-";
-    debug(`hands=${hands.length} palmY=${palmY} streak=${raisedStreak} t=${videoEl.currentTime.toFixed(1)}`);
+    debug(`hands=${hands.length} palmY=${palmY} pose=${raised} streak=${raisedStreak} t=${videoEl.currentTime.toFixed(1)}`);
   }
 
   if (held && handWasDown && Date.now() - lastRaise > 4000) {
