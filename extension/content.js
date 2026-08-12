@@ -236,6 +236,9 @@
         .answer .math.inline{ display:inline; margin:0; }
         .answer .figure{ margin:10px 0; }
         .answer .figure svg{ display:block; width:100%; height:auto; border-radius:10px; background:#f5efe4; }
+        .answer .figure.frame{ pointer-events:auto; cursor:pointer; }
+        .answer .figure.frame img{ display:block; width:100%; height:auto; border-radius:10px; margin-bottom:4px; }
+        .answer .figure.frame .fcap{ font-size:11px; color:#8a857b; }
         .answer .foot{ display:flex; align-items:center; gap:14px; }
         .answer .meta{ font-size:12px; color:#8a857b; font-variant-numeric:tabular-nums; }
         .fb{ display:flex; gap:6px; opacity:0; transition:opacity .4s ease .3s; pointer-events:auto; }
@@ -383,18 +386,40 @@
     });
 
     const TS = /\b(\d{1,2}:\d{2}(?::\d{2})?)\b/g;
+    const FRAME = /\[\[frame:(\d{1,2}:\d{2}(?::\d{2})?)\]\]/g;
+    let frameBudget = 2; // per answer — reset in renderRich
 
-    // Append text to a parent, turning timestamps into seek chips.
+    // Append text to a parent: timestamps become seek chips, and [[frame:M:SS]]
+    // markers become figure slots that the controller fills with the actual
+    // video frame from that moment (over-budget markers degrade to plain chips).
     const appendTextWithTs = (parent, text) => {
-      let last = 0, m; TS.lastIndex = 0;
-      while ((m = TS.exec(text))) {
-        if (!tsOn) break;
-        if (m.index > last) parent.append(text.slice(last, m.index));
-        const a = document.createElement("span"); a.className = "ts"; a.textContent = m[1];
-        a.onclick = () => h.onSeek?.(m[1].split(":").map(Number).reduce((x, n) => x * 60 + n, 0));
-        parent.append(a); last = m.index + m[1].length;
+      const prose = (seg) => {
+        let last = 0, m; TS.lastIndex = 0;
+        while ((m = TS.exec(seg))) {
+          if (!tsOn) break;
+          if (m.index > last) parent.append(seg.slice(last, m.index));
+          const a = document.createElement("span"); a.className = "ts"; a.textContent = m[1];
+          a.onclick = () => h.onSeek?.(m[1].split(":").map(Number).reduce((x, n) => x * 60 + n, 0));
+          parent.append(a); last = m.index + m[1].length;
+        }
+        if (last < seg.length) parent.append(seg.slice(last));
+      };
+      let last = 0, fm; FRAME.lastIndex = 0;
+      while ((fm = FRAME.exec(text))) {
+        if (fm.index > last) prose(text.slice(last, fm.index));
+        last = fm.index + fm[0].length;
+        if (frameBudget-- <= 0) { prose(fm[1]); continue; } // over budget → plain timestamp chip
+        const secs = fm[1].split(":").map(Number).reduce((x, n) => x * 60 + n, 0);
+        const fig = document.createElement("div");
+        fig.className = "figure frame";
+        fig.title = "Jump to this moment";
+        const cap = document.createElement("span"); cap.className = "fcap"; cap.textContent = `📺 ${fm[1]}`;
+        fig.append(cap);
+        fig.onclick = () => h.onSeek?.(secs);
+        h.onFrameRecall?.(secs, fig); // controller fills in the captured frame (or removes the slot)
+        parent.append(fig);
       }
-      if (last < text.length) parent.append(text.slice(last));
+      if (last < text.length) prose(text.slice(last));
     };
 
     // Render one $…$ / $$…$$ segment with KaTeX (bundled, local); on any error
@@ -438,6 +463,7 @@
     // prose with timestamp chips. Anything unrecognized degrades to plain text.
     const renderRich = (parent, raw) => {
       parent.textContent = "";
+      frameBudget = 2;
       const FENCE = /```(\w*)\n?([\s\S]*?)```/g;
       let last = 0, fm;
       const renderText = (seg) => {
@@ -993,6 +1019,7 @@
   function makeSpeechFilter() {
     let mode = "text"; // text | math | fence
     let tail = "";
+    const stripFrames = (s) => s.replace(/\[\[frame:[^\]]*\]\]/g, ""); // markers are visual-only
     const flushTail = () => { const t = tail; tail = ""; return t; };
     const feed = (delta) => {
       let s = tail + delta;
@@ -1023,6 +1050,7 @@
       return out;
     };
     feed.flush = () => (mode === "text" ? flushTail() : (tail = "", "")); // dangling opener → drop
+    feed.stripFrames = stripFrames;
     return feed;
   }
 
@@ -1127,6 +1155,45 @@
     resumeVideo();
   }
 
+  // ---- frame recall: the TA marks [[frame:M:SS]] for moments worth SEEING.
+  // The video is paused during Q&A, so we seek the player there, draw the
+  // <video> element straight onto a canvas (YouTube uses MSE blob URLs →
+  // same-origin → canvas stays clean, no CORS taint), and pop the frame into
+  // the figure slot. Then we seek back to where the student paused. Captures
+  // run one at a time so seeks never fight each other.
+  let frameChain = Promise.resolve();
+  function onFrameRecall(seconds, fig) {
+    frameChain = frameChain.then(() => fillFrame(seconds, fig)).catch(() => { try { fig.remove(); } catch (_) {} });
+  }
+  function seekAndSettle(v, t) {
+    return new Promise((resolve) => {
+      if (Math.abs(v.currentTime - t) < 0.05) return setTimeout(resolve, 60);
+      const on = () => done();
+      function done() { clearTimeout(to); v.removeEventListener("seeked", on); setTimeout(resolve, 120); } // let the new frame paint
+      const to = setTimeout(done, 1500); // seek never resolves → give up, capture whatever is there
+      v.addEventListener("seeked", on);
+      v.currentTime = t;
+    });
+  }
+  async function fillFrame(seconds, fig) {
+    const v = video();
+    if (!v || !v.paused) { fig.remove(); return; } // student moved on — skip quietly
+    const t0 = v.currentTime;
+    try {
+      await seekAndSettle(v, seconds);
+      if (!v.paused) { fig.remove(); return; } // student hit play mid-capture
+      const c = document.createElement("canvas");
+      c.width = v.videoWidth; c.height = v.videoHeight;
+      if (!c.width || !c.height) { fig.remove(); return; }
+      c.getContext("2d").drawImage(v, 0, 0);
+      const url = c.toDataURL("image/jpeg", 0.85); // throws if tainted
+      const img = document.createElement("img");
+      img.src = url; img.alt = `Frame at ${seconds}s`;
+      fig.prepend(img);
+    } catch (_) { fig.remove(); }
+    finally { try { await seekAndSettle(v, t0); } catch (_) {} }
+  }
+
   // ---- visual questions: ask the background worker to capture the tab frame ----
   function captureFrame() {
     if (!captureOn) return Promise.resolve(null); // screenshot disabled in settings
@@ -1210,7 +1277,7 @@
               speakBuf += speechFilter(ev.text);
               let cut;
               while ((cut = sentenceCut(speakBuf)) !== -1) {
-                const s = speakBuf.slice(0, cut).trim();
+                const s = speechFilter.stripFrames(speakBuf.slice(0, cut)).trim();
                 speakBuf = speakBuf.slice(cut);
                 if (s) speechPush(s, speakToken);
               }
@@ -1223,7 +1290,7 @@
             if (view) view.finishAnswer({ id: answerId, meta: `Lecture ${lec.index} · ${fmt(currentTimeSeconds)}` });
             // Spoken: flush the last partial sentence; askFollowUp fires when the queue drains.
             // Silent: show the follow-up (buttons) immediately.
-            if (speakThis) { const lastBit = speakBuf + speechFilter.flush(); if (lastBit.trim()) speechPush(lastBit.trim(), speakToken); speechEnd(speakToken); }
+            if (speakThis) { const lastBit = speechFilter.stripFrames(speakBuf + speechFilter.flush()).replace(/\[\[[^\]]*$/, ""); if (lastBit.trim()) speechPush(lastBit.trim(), speakToken); speechEnd(speakToken); }
             else askFollowUp();
           }
         }
