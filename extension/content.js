@@ -52,6 +52,7 @@
   let ttsVoice = "alloy"; // OpenAI TTS voice
   let gestureOn = true;   // webcam hand-raise detection
   let captureOn = true;   // send a screenshot on the first question of a session
+  let bargeInOn = true;   // interrupt the spoken answer just by talking
   let panelPos = "right"; // answer panel position: right | bottom | left
   let answerStyle = "brief";  // brief | detailed
   let spoilers = "strict";    // strict | relaxed
@@ -67,6 +68,8 @@
   let finalTranscript = "";
   let silenceTimer = null;
   let mediaRecorder = null, audioStream = null, audioCtx = null, vadTimer = null, speechDetected = false;
+  let micGrantedOnce = false; // mic was authorized this session → barge-in monitor may run
+  let askAbort = null;        // AbortController for the in-flight /ask stream (barge-in cancels it)
   let sessionFrame = null;   // screenshot of the paused video, first question of a session
   let handRaiseOn = false;
 
@@ -93,9 +96,10 @@
     };
     try {
       if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.local) {
-        chrome.storage.local.get(["ryhLang", "ryhSpeak", "ryhVoice", "ryhGesture", "ryhCapture", "ryhPanel", "ryhStyle", "ryhSpoilers", "ryhSpeed", "ryhTimestamps", "ryhFont", "ryhServer", "ryhVad", "ryhTelemetry", "ryhKey"], (r) => {
+        chrome.storage.local.get(["ryhLang", "ryhSpeak", "ryhVoice", "ryhGesture", "ryhCapture", "ryhPanel", "ryhStyle", "ryhSpoilers", "ryhSpeed", "ryhTimestamps", "ryhFont", "ryhServer", "ryhVad", "ryhTelemetry", "ryhKey", "ryhBarge"], (r) => {
           sttLang = r.ryhLang || fromNav();
           if (typeof r.ryhSpeak === "boolean") speakAnswers = r.ryhSpeak;
+          if (typeof r.ryhBarge === "boolean") bargeInOn = r.ryhBarge;
           if (r.ryhVoice) ttsVoice = r.ryhVoice;
           if (typeof r.ryhGesture === "boolean") gestureOn = r.ryhGesture;
           if (typeof r.ryhCapture === "boolean") captureOn = r.ryhCapture;
@@ -149,6 +153,7 @@
       if (area !== "local") return;
       if (changes.ryhLang) sttLang = changes.ryhLang.newValue || sttLang;
       if (changes.ryhSpeak) speakAnswers = !!changes.ryhSpeak.newValue;
+      if (changes.ryhBarge) bargeInOn = !!changes.ryhBarge.newValue;
       if (changes.ryhVoice) ttsVoice = changes.ryhVoice.newValue || ttsVoice;
       if (changes.ryhGesture) gestureOn = !!changes.ryhGesture.newValue;
       if (changes.ryhCapture) captureOn = !!changes.ryhCapture.newValue;
@@ -585,9 +590,65 @@
     }
   }
 
+  // ---- barge-in: while the assistant speaks, keep an ear on the mic; if the
+  // learner starts talking, cut the answer off and listen right away — the
+  // budget version of full-duplex. Echo cancellation (requested explicitly)
+  // keeps the assistant's own voice from tripping the detector; we also require
+  // ~360ms of sustained loudness so clicks and residual echo blips don't fire it.
+  let bargeStream = null, bargeCtx = null, bargeTimer = null;
+
+  function stopBargeInMonitor() {
+    if (bargeTimer) { clearInterval(bargeTimer); bargeTimer = null; }
+    try { if (bargeCtx) { bargeCtx.close(); bargeCtx = null; } } catch (_) {}
+    try { if (bargeStream) { bargeStream.getTracks().forEach((t) => t.stop()); bargeStream = null; } } catch (_) {}
+  }
+
+  async function startBargeInMonitor(token) {
+    stopBargeInMonitor();
+    if (!bargeInOn || !micGrantedOnce) return; // never prompt for the mic mid-answer
+    let stream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
+    } catch (_) { return; }
+    if (token !== speechToken) { try { stream.getTracks().forEach((t) => t.stop()); } catch (_) {} return; } // answer ended while we asked
+    bargeStream = stream;
+    try {
+      bargeCtx = new (window.AudioContext || window.webkitAudioContext)();
+      bargeCtx.resume && bargeCtx.resume();
+      const analyser = bargeCtx.createAnalyser();
+      analyser.fftSize = 512;
+      bargeCtx.createMediaStreamSource(stream).connect(analyser);
+      const buf = new Uint8Array(analyser.fftSize);
+      const start = Date.now();
+      let loudStreak = 0;
+      bargeTimer = setInterval(() => {
+        if (token !== speechToken) return stopBargeInMonitor(); // answer stopped → mic handoff to dictation
+        analyser.getByteTimeDomainData(buf);
+        let sum = 0;
+        for (const v of buf) { const d = v - 128; sum += d * d; }
+        const rms = Math.sqrt(sum / buf.length);
+        if (Date.now() - start < 500) return; // let playback + AEC settle
+        loudStreak = rms > 10 ? loudStreak + 1 : 0;
+        if (loudStreak >= 3) { stopBargeInMonitor(); onBargeIn(); }
+      }, 120);
+    } catch (_) { stopBargeInMonitor(); }
+  }
+
+  // Interrupted: cancel the answer stream, cut the audio, and go straight to
+  // listening in the answer card (same shape as the follow-up, no prompt spoken).
+  function onBargeIn() {
+    if (askAbort) { try { askAbort.abort(); } catch (_) {} }
+    stopSpeaking(); // bumps speechToken → speechPump stalls; monitor already off
+    followUpMode = true; // keep the card; dictation happens inside it
+    const L = langEntry();
+    if (view) view.showFollowup({ prompt: L.followUp, listening: true, askLabel: L.askMore, resumeLabel: L.resume });
+    if (!listening) toggleDictation();
+  }
+
   async function startWhisper() {
     try {
-      audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      audioStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
+      micGrantedOnce = true; // enables the barge-in monitor during spoken answers
     } catch (_) {
       return abortTurn("Microphone permission denied — allow it and try again.");
     }
@@ -822,6 +883,7 @@
   }
   function stopSpeaking() {
     speechToken++;
+    stopBargeInMonitor();
     try { if (currentAudio) { currentAudio.pause(); currentAudio = null; } } catch (_) {}
     try { window.speechSynthesis && speechSynthesis.cancel(); } catch (_) {}
     if (view) view.setSpeaking(false);
@@ -874,7 +936,7 @@
   function speechPump(token) {
     if (token !== speechToken || speechBusy) return;
     if (speechQueue.length === 0) {
-      if (speechStreamDone && !speechEndFired) { speechEndFired = true; const cb = speechOnEnd; speechOnEnd = null; if (cb) cb(); }
+      if (speechStreamDone && !speechEndFired) { speechEndFired = true; stopBargeInMonitor(); const cb = speechOnEnd; speechOnEnd = null; if (cb) cb(); }
       return;
     }
     speechBusy = true;
@@ -959,7 +1021,7 @@
     active = true;
     const speakThis = speakAnswers;
     let speakToken = 0, speakBuf = "";
-    if (speakThis) { speakToken = speechStart(askFollowUp); if (view) view.setSpeaking(true); } // speak sentences as they arrive
+    if (speakThis) { speakToken = speechStart(askFollowUp); startBargeInMonitor(speakToken); if (view) view.setSpeaking(true); } // speak sentences as they arrive
     else stopSpeaking();
     if (view) view.setState("thinking");
     const turnIndex = history.length; // 0 = first in this pause session
@@ -975,9 +1037,11 @@
     let answer = "";
     let answerId = null;
     try {
+      askAbort = new AbortController(); // barge-in cancels the stream mid-answer
       const res = await fetch(`${BACKEND}/ask`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal: askAbort.signal,
         body: JSON.stringify({
           playlistId: getPlaylistId(),
           videoId: getVideoId(),
@@ -1031,9 +1095,10 @@
         }
       }
     } catch (err) {
-      if (view) view.showError(err.status === 429 ? RATE_LIMIT_MSG : `Couldn't reach the backend — is it running on ${BACKEND}?`);
+      if (err.name !== "AbortError" && view) view.showError(err.status === 429 ? RATE_LIMIT_MSG : `Couldn't reach the backend — is it running on ${BACKEND}?`); // AbortError = intentional barge-in
     } finally {
       if (answer) history.push({ question: q, answer });
+      askAbort = null;
       busy = false;
     }
   }
