@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Raise Your Hand",
-  "version": "1.3.1",
+  "version": "1.3.2",
   "description": "Pause a YouTube university lecture and ask a course-aware teaching assistant that knows the whole playlist.",
   "icons": {
     "16": "icons/icon16.png",

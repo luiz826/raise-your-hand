@@ -748,6 +748,7 @@
   // keeps the assistant's own voice from tripping the detector; we also require
   // ~360ms of sustained loudness so clicks and residual echo blips don't fire it.
   let bargeStream = null, bargeCtx = null, bargeTimer = null;
+  const BARGE_RMS = 8; // a bit above the dictation gate (7) — must reject AEC echo residue
 
   function stopBargeInMonitor() {
     if (bargeTimer) { clearInterval(bargeTimer); bargeTimer = null; }
@@ -773,14 +774,17 @@
       const buf = new Uint8Array(analyser.fftSize);
       const start = Date.now();
       let loudStreak = 0;
+      let ticks = 0, maxRms = 0;
       bargeTimer = setInterval(() => {
         if (token !== speechToken) return stopBargeInMonitor(); // answer stopped → mic handoff to dictation
         analyser.getByteTimeDomainData(buf);
         let sum = 0;
         for (const v of buf) { const d = v - 128; sum += d * d; }
         const rms = Math.sqrt(sum / buf.length);
+        maxRms = Math.max(maxRms, rms);
+        if (++ticks % 10 === 0) { console.debug(`[ryh] barge-in: maxRMS=${maxRms.toFixed(1)} (fires at >${BARGE_RMS} x3)`); maxRms = 0; }
         if (Date.now() - start < 500) return; // let playback + AEC settle
-        loudStreak = rms > 10 ? loudStreak + 1 : 0;
+        loudStreak = rms > BARGE_RMS ? loudStreak + 1 : 0;
         if (loudStreak >= 3) { stopBargeInMonitor(); onBargeIn(); }
       }, 120);
     } catch (_) { stopBargeInMonitor(); }
@@ -1082,7 +1086,7 @@
           i++; // swallowed: diagrams are visual only
         }
       }
-      return out;
+      return out.replace(/\\([a-zA-Z]+)/g, "$1").replace(/[{}]/g, ""); // bare-LaTeX leak (no $…$) → say the command name, skip braces
     };
     feed.flush = () => (mode === "text" ? flushTail() : (tail = "", "")); // dangling opener → drop
     feed.stripFrames = stripFrames;
