@@ -232,6 +232,10 @@
         .answer p::-webkit-scrollbar{ width:6px; }
         .answer p::-webkit-scrollbar-thumb{ background:#e6a94d66; border-radius:3px; }
         .answer .ts{ color:var(--amber-ink); text-decoration:underline; text-underline-offset:3px; text-decoration-thickness:1px; cursor:pointer; pointer-events:auto; }
+        .answer .math{ display:block; margin:10px 0; overflow-x:auto; color:var(--chalk); }
+        .answer .math.inline{ display:inline; margin:0; }
+        .answer .figure{ margin:10px 0; }
+        .answer .figure svg{ display:block; width:100%; height:auto; border-radius:10px; background:#f5efe4; }
         .answer .foot{ display:flex; align-items:center; gap:14px; }
         .answer .meta{ font-size:12px; color:#8a857b; font-variant-numeric:tabular-nums; }
         .fb{ display:flex; gap:6px; opacity:0; transition:opacity .4s ease .3s; pointer-events:auto; }
@@ -327,6 +331,16 @@
         </div>
       </div>`;
 
+    // KaTeX's stylesheet + fonts can't reach the shadow root via content-script
+    // CSS, so inline them here with font URLs rewritten to extension URLs.
+    try {
+      fetch(chrome.runtime.getURL("vendor/katex/katex.min.css")).then((r) => r.text()).then((css) => {
+        const st = document.createElement("style");
+        st.textContent = css.replace(/url\(/g, `url(${chrome.runtime.getURL("vendor/katex/")}`);
+        root.appendChild(st);
+      }).catch(() => {});
+    } catch (_) {}
+
     const layer = root.querySelector(".layer");
     const q = (s) => root.querySelector(s);
     const said = q(".said"), answerEl = q(".answer"), textEl = q(".text"), metaEl = q(".meta"),
@@ -369,6 +383,93 @@
     });
 
     const TS = /\b(\d{1,2}:\d{2}(?::\d{2})?)\b/g;
+
+    // Append text to a parent, turning timestamps into seek chips.
+    const appendTextWithTs = (parent, text) => {
+      let last = 0, m; TS.lastIndex = 0;
+      while ((m = TS.exec(text))) {
+        if (!tsOn) break;
+        if (m.index > last) parent.append(text.slice(last, m.index));
+        const a = document.createElement("span"); a.className = "ts"; a.textContent = m[1];
+        a.onclick = () => h.onSeek?.(m[1].split(":").map(Number).reduce((x, n) => x * 60 + n, 0));
+        parent.append(a); last = m.index + m[1].length;
+      }
+      if (last < text.length) parent.append(text.slice(last));
+    };
+
+    // Render one $…$ / $$…$$ segment with KaTeX (bundled, local); on any error
+    // fall back to the raw source so a bad formula never breaks the card.
+    const appendMath = (parent, src, display) => {
+      const span = document.createElement("span");
+      span.className = display ? "math" : "math inline";
+      try {
+        if (typeof katex === "undefined") throw new Error("katex not loaded");
+        katex.render(src, span, { displayMode: display, throwOnError: true });
+      } catch (_) { span.textContent = src; }
+      parent.append(span);
+    };
+
+    // Accept only a conservative SVG subset from the model: shapes, text, markers.
+    // Strips scriptable vectors (on* handlers, hrefs, script/foreignObject).
+    const SVG_OK_TAGS = new Set(["svg", "g", "path", "rect", "circle", "ellipse", "line", "polyline", "polygon", "text", "tspan", "defs", "marker", "title", "desc"]);
+    function sanitizeSvg(svgText) {
+      try {
+        const doc = new DOMParser().parseFromString(svgText, "image/svg+xml");
+        const svg = doc.documentElement;
+        if (!svg || svg.tagName.toLowerCase() !== "svg" || doc.querySelector("parsererror")) return null;
+        const walk = (el) => {
+          for (const node of [...el.children]) {
+            if (!SVG_OK_TAGS.has(node.tagName.toLowerCase())) { node.remove(); continue; }
+            for (const attr of [...node.attributes]) {
+              const n = attr.name.toLowerCase();
+              if (n.startsWith("on") || n === "href" || n === "xlink:href") node.removeAttribute(attr.name);
+            }
+            walk(node);
+          }
+        };
+        walk(svg);
+        for (const attr of [...svg.attributes]) { const n = attr.name.toLowerCase(); if (n.startsWith("on") || n.includes("href")) svg.removeAttribute(attr.name); }
+        return document.importNode(svg, true);
+      } catch (_) { return null; }
+    }
+
+    // Split the finished answer into text / math / diagram blocks and render each:
+    // ```svg fences → sanitized inline SVG; $$…$$ and $…$ → KaTeX; the rest is
+    // prose with timestamp chips. Anything unrecognized degrades to plain text.
+    const renderRich = (parent, raw) => {
+      parent.textContent = "";
+      const FENCE = /```(\w*)\n?([\s\S]*?)```/g;
+      let last = 0, fm;
+      const renderText = (seg) => {
+        // display math first, then inline math inside the remaining prose
+        const DISP = /\$\$([\s\S]+?)\$\$/g;
+        let l2 = 0, dm;
+        const renderInline = (s) => {
+          const INL = /\$([^$\n]+?)\$/g;
+          let l3 = 0, im;
+          while ((im = INL.exec(s))) {
+            if (im.index > l3) appendTextWithTs(parent, s.slice(l3, im.index));
+            appendMath(parent, im[1], false); l3 = im.index + im[0].length;
+          }
+          if (l3 < s.length) appendTextWithTs(parent, s.slice(l3));
+        };
+        while ((dm = DISP.exec(seg))) {
+          if (dm.index > l2) renderInline(seg.slice(l2, dm.index));
+          appendMath(parent, dm[1], true); l2 = dm.index + dm[0].length;
+        }
+        if (l2 < seg.length) renderInline(seg.slice(l2));
+      };
+      while ((fm = FENCE.exec(raw))) {
+        if (fm.index > last) renderText(raw.slice(last, fm.index));
+        const body = fm[2].trim();
+        if (fm[1].toLowerCase() === "svg" || body.startsWith("<svg")) {
+          const svg = sanitizeSvg(body);
+          if (svg) { const fig = document.createElement("div"); fig.className = "figure"; fig.append(svg); parent.append(fig); }
+        } else if (body) appendTextWithTs(parent, body); // non-svg fence → show as plain text
+        last = fm.index + fm[0].length;
+      }
+      if (last < raw.length) renderText(raw.slice(last));
+    };
     const api = {
       mountLangs(langs, current) {
         langSel.innerHTML = langs.map((l) => `<option value="${l.code}">${l.label}</option>`).join("");
@@ -386,17 +487,7 @@
       appendAnswer(delta) { if (layer.dataset.state !== "answer") this.beginAnswer(); textEl.textContent += delta; }, // stay at the top so the reader starts at the beginning
       finishAnswer({ id, meta } = {}) {
         answerId = id || null;
-        if (tsOn) {
-          const raw = textEl.textContent; textEl.innerHTML = "";
-          let last = 0, m; TS.lastIndex = 0;
-          while ((m = TS.exec(raw))) {
-            if (m.index > last) textEl.append(raw.slice(last, m.index));
-            const a = document.createElement("span"); a.className = "ts"; a.textContent = m[1];
-            a.onclick = () => h.onSeek?.(m[1].split(":").map(Number).reduce((x, n) => x * 60 + n, 0));
-            textEl.append(a); last = m.index + m[1].length;
-          }
-          if (last < raw.length) textEl.append(raw.slice(last));
-        }
+        renderRich(textEl, textEl.textContent); // prose + timestamps + math + diagrams
         if (meta) metaEl.textContent = meta;
         answerEl.classList.add("done");
         textEl.scrollTop = 0; // show the start of the answer for reading
@@ -893,6 +984,48 @@
   // answer starts playing after the FIRST sentence instead of the whole reply.
   // The next sentence is synthesized one ahead (prefetch) so playback is gapless
   // — otherwise there's an audible pause at each "." while the next clip renders. ----
+
+  // Streaming filter that keeps visual-only blocks out of the TTS: $$…$$ display
+  // math and ```…``` diagram fences are dropped; inline $…$ is unwrapped (the
+  // persona keeps inline math simple and speakable). Delimiters can split across
+  // stream deltas, so a short tail is held back whenever a chunk may end
+  // mid-delimiter. The card still shows everything — see renderRich.
+  function makeSpeechFilter() {
+    let mode = "text"; // text | math | fence
+    let tail = "";
+    const flushTail = () => { const t = tail; tail = ""; return t; };
+    const feed = (delta) => {
+      let s = tail + delta;
+      tail = "";
+      let out = "";
+      let i = 0;
+      while (i < s.length) {
+        const rest = s.slice(i);
+        if (rest === "$" || rest === "`" || rest === "``") { tail = rest; break; } // maybe a split delimiter — wait for more
+        if (mode === "text") {
+          if (rest.startsWith("$$")) { mode = "math"; i += 2; continue; }
+          if (rest.startsWith("```")) { mode = "fence"; i += 3; continue; }
+          if (rest.startsWith("$")) {
+            const end = s.indexOf("$", i + 1);
+            if (end === -1) { tail = rest; break; } // unclosed inline math — wait for the rest
+            out += s.slice(i + 1, end).replace(/\\([a-zA-Z]+)/g, "$1").replace(/[{}]/g, ""); // \beta → beta
+            i = end + 1; continue;
+          }
+          out += s[i]; i++;
+        } else if (mode === "math") {
+          if (rest.startsWith("$$")) { mode = "text"; i += 2; continue; }
+          i++; // swallowed: display math is visual only
+        } else { // fence
+          if (rest.startsWith("```")) { mode = "text"; i += 3; continue; }
+          i++; // swallowed: diagrams are visual only
+        }
+      }
+      return out;
+    };
+    feed.flush = () => (mode === "text" ? flushTail() : (tail = "", "")); // dangling opener → drop
+    return feed;
+  }
+
   let speechQueue = [];
   let speechBusy = false;
   let speechStreamDone = false;
@@ -1021,6 +1154,7 @@
     active = true;
     const speakThis = speakAnswers;
     let speakToken = 0, speakBuf = "";
+    const speechFilter = makeSpeechFilter();
     if (speakThis) { speakToken = speechStart(askFollowUp); startBargeInMonitor(speakToken); if (view) view.setSpeaking(true); } // speak sentences as they arrive
     else stopSpeaking();
     if (view) view.setState("thinking");
@@ -1073,7 +1207,7 @@
             answer += ev.text;
             if (view) view.appendAnswer(ev.text);
             if (speakThis) { // hand each finished sentence to the speech queue immediately
-              speakBuf += ev.text;
+              speakBuf += speechFilter(ev.text);
               let cut;
               while ((cut = sentenceCut(speakBuf)) !== -1) {
                 const s = speakBuf.slice(0, cut).trim();
@@ -1089,7 +1223,7 @@
             if (view) view.finishAnswer({ id: answerId, meta: `Lecture ${lec.index} · ${fmt(currentTimeSeconds)}` });
             // Spoken: flush the last partial sentence; askFollowUp fires when the queue drains.
             // Silent: show the follow-up (buttons) immediately.
-            if (speakThis) { if (speakBuf.trim()) speechPush(speakBuf.trim(), speakToken); speechEnd(speakToken); }
+            if (speakThis) { const lastBit = speakBuf + speechFilter.flush(); if (lastBit.trim()) speechPush(lastBit.trim(), speakToken); speechEnd(speakToken); }
             else askFollowUp();
           }
         }

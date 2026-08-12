@@ -19,7 +19,8 @@
     "fetch:mediapipe": "node scripts/fetch-mediapipe.mjs"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.90.0"
+    "@anthropic-ai/sdk": "^0.90.0",
+    "katex": "^0.18.4"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
