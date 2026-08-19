@@ -1,17 +1,17 @@
 # Deploy — single VPS, all-in-one
 
-Runs the whole thing on one box: **Node backend + Kokoro TTS + Whisper STT**, behind **Caddy** (automatic HTTPS). End users then just install the extension — no local servers, no keys.
+Runs the whole thing on one box: **Node backend + thin TTS/STT forwarders** (OpenAI gpt-4o-mini-tts / gpt-4o-transcribe), behind **Caddy** (automatic HTTPS). End users then just install the extension — no local servers, no keys.
 
 ```
-                         ┌─────────────── your VPS ───────────────┐
-  extension  ──https──▶  │  Caddy ─┬─ /tts ─▶ tts   (Kokoro)       │
- (youtube.com)           │         ├─ /stt ─▶ stt   (Whisper)      │
-                         │         └─ *    ─▶ backend (Node + LLM) │
-                         └─────────────────────────────────────────┘
+                         ┌─────────────────────── your VPS ───────────────────────┐
+  extension  ──https──▶  │  Caddy ─┬─ /tts ─▶ tts   (→ OpenAI gpt-4o-mini-tts)    │
+ (youtube.com)           │         ├─ /stt ─▶ stt   (→ OpenAI gpt-4o-transcribe)  │
+                         │         └─ *    ─▶ backend (Node + LLM)                │
+                         └─────────────────────────────────────────────────────────┘
 ```
 
 ## You provide
-- A **VPS** with Docker + Docker Compose. Size: **≥ 4 GB RAM, 2+ vCPU** (Whisper `small` + Kokoro + Node). Hetzner CPX21/CPX31, DigitalOcean, etc. — ~$15–40/mo.
+- A **VPS** with Docker + Docker Compose. The voice servers are API forwarders (no local models), so **2 GB RAM / 1 vCPU** already works; **≥ 4 GB / 2 vCPU** is comfortable. Hetzner, DigitalOcean, etc. — ~$5–20/mo.
 - A **domain** (or subdomain) with an **A record → your VPS IP**, e.g. `voice.yourdomain.com`.
 - A **Moonshot (Kimi) API key**. Set a **spend cap** in the Moonshot dashboard so a spike can't surprise-bill you.
 - A **Chrome Web Store developer account** ($5 one-time) to publish.
