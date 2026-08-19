@@ -758,13 +758,14 @@
 
   async function startBargeInMonitor(token) {
     stopBargeInMonitor();
-    if (!bargeInOn || !micGrantedOnce) return; // never prompt for the mic mid-answer
+    if (!bargeInOn || !micGrantedOnce) { console.log(`[ryh] barge-in: monitor skipped (bargeInOn=${bargeInOn}, micGranted=${micGrantedOnce})`); return; } // never prompt for the mic mid-answer
     let stream;
     try {
       stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
-    } catch (_) { return; }
-    if (token !== speechToken) { try { stream.getTracks().forEach((t) => t.stop()); } catch (_) {} return; } // answer ended while we asked
+    } catch (e) { console.log(`[ryh] barge-in: mic unavailable: ${(e && e.message) || e}`); return; }
+    if (token !== speechToken) { try { stream.getTracks().forEach((t) => t.stop()); } catch (_) {} console.log("[ryh] barge-in: answer ended before monitor could start"); return; } // answer ended while we asked
     bargeStream = stream;
+    console.log("[ryh] barge-in: monitor started");
     try {
       bargeCtx = new (window.AudioContext || window.webkitAudioContext)();
       bargeCtx.resume && bargeCtx.resume();
@@ -782,7 +783,7 @@
         for (const v of buf) { const d = v - 128; sum += d * d; }
         const rms = Math.sqrt(sum / buf.length);
         maxRms = Math.max(maxRms, rms);
-        if (++ticks % 10 === 0) { console.debug(`[ryh] barge-in: maxRMS=${maxRms.toFixed(1)} (fires at >${BARGE_RMS} x3)`); maxRms = 0; }
+        if (++ticks % 10 === 0) { console.log(`[ryh] barge-in: maxRMS=${maxRms.toFixed(1)} (fires at >${BARGE_RMS} x3)`); maxRms = 0; }
         if (Date.now() - start < 500) return; // let playback + AEC settle
         loudStreak = rms > BARGE_RMS ? loudStreak + 1 : 0;
         if (loudStreak >= 3) { stopBargeInMonitor(); onBargeIn(); }
@@ -793,6 +794,7 @@
   // Interrupted: cancel the answer stream, cut the audio, and go straight to
   // listening in the answer card (same shape as the follow-up, no prompt spoken).
   function onBargeIn() {
+    console.log("[ryh] barge-in: fired — cutting the answer, listening");
     if (askAbort) { try { askAbort.abort(); } catch (_) {} }
     stopSpeaking(); // bumps speechToken → speechPump stalls; monitor already off
     followUpMode = true; // keep the card; dictation happens inside it
