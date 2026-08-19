@@ -5,6 +5,7 @@
 const DEFAULTS = {
   ryhLang: (navigator.language || "en").toLowerCase().startsWith("pt") ? "pt-BR" : "en-US",
   ryhSpeak: true,
+  ryhBarge: true,
   ryhVoice: "alloy",
   ryhGesture: true,
   ryhCapture: true,
@@ -35,6 +36,7 @@ chrome.storage.local.get(Object.keys(DEFAULTS), (r) => {
   const g = (k) => (r[k] === undefined ? DEFAULTS[k] : r[k]);
   $("lang").value = g("ryhLang");
   $("speak").checked = !!g("ryhSpeak");
+  $("barge").checked = !!g("ryhBarge");
   $("voice").value = g("ryhVoice");
   $("gesture").checked = !!g("ryhGesture");
   $("capture").checked = !!g("ryhCapture");
@@ -53,6 +55,7 @@ chrome.storage.local.get(Object.keys(DEFAULTS), (r) => {
 
 $("lang").addEventListener("change", (e) => save("ryhLang", e.target.value));
 $("speak").addEventListener("change", (e) => save("ryhSpeak", e.target.checked));
+$("barge").addEventListener("change", (e) => save("ryhBarge", e.target.checked));
 $("voice").addEventListener("change", (e) => save("ryhVoice", e.target.value));
 $("gesture").addEventListener("change", (e) => save("ryhGesture", e.target.checked));
 $("capture").addEventListener("change", (e) => save("ryhCapture", e.target.checked));
