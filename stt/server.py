@@ -52,7 +52,7 @@ def _audio_ext(audio: bytes) -> str:
     return "webm"  # EBML (webm) or MediaRecorder default
 
 
-def transcribe(audio: bytes, lang: str | None) -> str:
+def transcribe(audio: bytes, lang: str | None, hint: str | None = None) -> str:
     """POST the audio to OpenAI /audio/transcriptions as multipart/form-data."""
     boundary = uuid.uuid4().hex
     ext = _audio_ext(audio)
@@ -70,6 +70,8 @@ def transcribe(audio: bytes, lang: str | None) -> str:
     body += field("response_format", "json")
     if lang:
         body += field("language", lang)
+    if hint:
+        body += field("prompt", hint)  # biases the recognizer toward the expected reply shape
     body += f"--{boundary}--\r\n".encode("utf-8")
 
     req = urllib.request.Request(
@@ -122,6 +124,13 @@ class Handler(BaseHTTPRequestHandler):
             return
         try:
             lang = (parse_qs(parsed.query).get("lang", [None])[0]) or None
+            # ctx=yn: the audio is a short reply to "Any more questions?" — telling the
+            # recognizer so sharply improves "no/não" vs. noise mishears.
+            ctx = parse_qs(parsed.query).get("ctx", [None])[0]
+            hint = (
+                "A very short spoken reply to the question 'Any more questions?' — "
+                "typically 'no', 'não', 'no more', 'that's all', 'nada', or a short follow-up question."
+            ) if ctx == "yn" else None
             n = int(self.headers.get("Content-Length", "0"))
             if n > 25_000_000:  # ~25MB cap — reject oversized/abusive uploads
                 self.send_response(413)
@@ -129,7 +138,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.end_headers()
                 return
             audio = self.rfile.read(n) if n else b""
-            text = transcribe(audio, lang) if audio else ""
+            text = transcribe(audio, lang, hint) if audio else ""
             payload = json.dumps({"text": text}).encode("utf-8")
             self.send_response(200)
             self._cors()

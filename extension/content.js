@@ -21,7 +21,7 @@
   const LANGS = [
     { code: "en-US", label: "EN", name: "English", ttsLang: "en-us", voice: "am_michael",
       followUp: "Any other questions?", askMore: "Ask another", resume: "Resume ▶",
-      noMore: /^(no|nope|nah|no thanks?|no thank you|that'?s all|that'?s it|i'?m good|im good|i'?m done|im done|nothing|nothing else|no more|no more questions?|all good|we'?re good|stop|thanks|thank you)\.?$/i },
+      noMore: /^(no|nope|nah|no thanks?|no thank you|that['’]?s all|that['’]?s it|i['’]?m good|im good|i['’]?m done|im done|nothing|nothing else|no more|no more questions?|all good|we['’]?re good|stop|thanks|thank you)\.?$/i },
     { code: "pt-BR", label: "PT", name: "Brazilian Portuguese", ttsLang: "pt-br", voice: "pm_alex",
       followUp: "Tem mais alguma pergunta?", askMore: "Outra pergunta", resume: "Continuar ▶",
       noMore: /^(n[ãa]o|nada|só isso|so isso|é isso|e isso|estou bem|tô bem|to bem|acabou|para|parar|obrigad[oa]|valeu|n[ãa]o obrigad[oa])\.?$/i },
@@ -823,7 +823,7 @@
       if (blob.size < 1200) return finishDictation(""); // essentially no audio → silence
       if (view) view.setState("thinking");
       const lang = (sttLang || "en").slice(0, 2); // pt-BR → pt
-      fetch(`${STT_BACKEND}/stt?lang=${lang}`, { method: "POST", body: blob })
+      fetch(`${STT_BACKEND}/stt?lang=${lang}${followUpMode ? "&ctx=yn" : ""}`, { method: "POST", body: blob })
         .then((r) => (r.ok ? r.json() : Promise.reject(new Error("stt"))))
         .then((j) => finishDictation(j.text || ""))
         .catch(() => {
@@ -1163,11 +1163,37 @@
   }
 
   // ---- follow-up loop ----
+  // Edit distance for tiny strings (follow-up replies are 1-2 words).
+  const lev = (a, b) => {
+    const m = a.length, n = b.length;
+    if (Math.abs(m - n) > 2) return 99;
+    const dp = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
+    for (let i = 0; i <= m; i++) dp[i][0] = i;
+    for (let j = 0; j <= n; j++) dp[0][j] = j;
+    for (let i = 1; i <= m; i++)
+      for (let j = 1; j <= n; j++)
+        dp[i][j] = Math.min(dp[i - 1][j] + 1, dp[i][j - 1] + 1, dp[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    return dp[m][n];
+  };
+  // "No more questions" detection. The follow-up reply is short, spoken, and often
+  // over residual noise — STT mishears "no/não" surprisingly often ("now", "nou",
+  // "num"…). One word: exact or tight fuzzy match (edit distance 1 for ≤4 letters,
+  // 2 for longer). Two words: must be a known negative PHRASE — a single fuzzy word
+  // is not enough ("não entendi" is a question, not a goodbye).
+  const NO_WORDS = ["no", "nao", "nada", "nope", "nah", "nou", "non", "num", "now", "know", "stop", "para", "acabou", "valeu", "nothing"];
+  const NO_PHRASES = ["no more", "no thanks", "no thank you", "thats all", "that is all", "thats it", "that is it", "nothing else", "all good", "im good", "im done", "we are good", "thank you", "so isso", "e isso", "estou bem", "to bem", "nao obrigado", "nao obrigada", "nao tenho", "mais nada", "nada mais", "era so isso", "pode parar"];
+  const normText = (s) => s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[.!?,;:'"\u2019]+/g, " ").replace(/\s+/g, " ").trim();
   function isNoMore(text) {
-    const t = text.trim();
+    const t = (text || "").trim();
     if (!t) return true;
-    if (/^(no|n[ãa]o|nope|nah)[.!\s]*$/i.test(t)) return true; // STT often mis-hears "não" as "no"
-    return LANGS.some((l) => l.noMore.test(t)); // accept any language's negative — STT can drift
+    if (LANGS.some((l) => l.noMore.test(t))) return true; // curated regexes (longer phrases)
+    const words = normText(t).split(" ").filter(Boolean);
+    if (words.length === 1) {
+      const w = words[0];
+      return NO_WORDS.some((a) => w === a || lev(w, a) <= (a.length <= 4 ? 1 : 2));
+    }
+    if (words.length === 2) return NO_PHRASES.includes(words.join(" "));
+    return false;
   }
   function askFollowUp(speakPrompt = true) {
     if (!active) return; // turn already ended — don't nag
