@@ -774,7 +774,8 @@
       bargeCtx.createMediaStreamSource(stream).connect(analyser);
       const buf = new Uint8Array(analyser.fftSize);
       const start = Date.now();
-      let loudStreak = 0;
+      let loudMs = 0; // accumulated loud time — decays instead of resetting, so
+                      // bursty natural interruptions ("wait, wait!") still count
       let ticks = 0, maxRms = 0;
       bargeTimer = setInterval(() => {
         if (token !== speechToken) return stopBargeInMonitor(); // answer stopped → mic handoff to dictation
@@ -783,10 +784,10 @@
         for (const v of buf) { const d = v - 128; sum += d * d; }
         const rms = Math.sqrt(sum / buf.length);
         maxRms = Math.max(maxRms, rms);
-        if (++ticks % 10 === 0) { console.log(`[ryh] barge-in: maxRMS=${maxRms.toFixed(1)} (fires at >${BARGE_RMS} x3)`); maxRms = 0; }
+        if (++ticks % 10 === 0) { console.log(`[ryh] barge-in: maxRMS=${maxRms.toFixed(1)} loudMs=${loudMs} (fires at ≥350ms over >${BARGE_RMS})`); maxRms = 0; }
         if (Date.now() - start < 500) return; // let playback + AEC settle
-        loudStreak = rms > BARGE_RMS ? loudStreak + 1 : 0;
-        if (loudStreak >= 3) { stopBargeInMonitor(); onBargeIn(); }
+        loudMs = rms > BARGE_RMS ? loudMs + 120 : Math.max(0, loudMs - 60); // gaps between words cost half
+        if (loudMs >= 350) { stopBargeInMonitor(); onBargeIn(); }
       }, 120);
     } catch (_) { stopBargeInMonitor(); }
   }
