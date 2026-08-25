@@ -17,6 +17,7 @@ import { assembleSegments, loadVideo, runQA, type PriorTurn } from "./lib/agent"
 import { logEvent, newId } from "./lib/events";
 import { acquireIngestSlot, rateLimit, releaseIngestSlot } from "./lib/guard";
 import { generateIllustration, illustrationKey, illustrationPath } from "./lib/illustrate";
+import { mintRealtimeSession, realtimeInstructions } from "./lib/realtime";
 
 const PORT = Number(process.env.PORT ?? 8787);
 const HOST = process.env.HOST ?? "127.0.0.1"; // bind localhost by default; set 0.0.0.0 to expose
@@ -35,6 +36,7 @@ const validId = (s: unknown, re: RegExp): s is string => typeof s === "string" &
 const ASK_PER_MIN = Number(process.env.RYH_ASK_PER_MIN ?? 30);
 const INGEST_PER_HOUR = Number(process.env.RYH_INGEST_PER_HOUR ?? 5);
 const ILLUSTRATE_PER_HOUR = Number(process.env.RYH_ILLUSTRATE_PER_HOUR ?? 10);
+const LIVE_PER_HOUR = Number(process.env.RYH_LIVE_PER_HOUR ?? 10);
 const MAX_CONCURRENT_INGESTS = Number(process.env.RYH_MAX_INGESTS ?? 2);
 
 // Rate-limit by source IP — not the client-supplied deviceId (which can be
@@ -373,6 +375,30 @@ const server = http.createServer(async (req, res) => {
           });
         }
         return sendJson(res, 200, { url: `/illustrations/${key}.png`, cached: !!cached });
+      } catch (err) {
+        return sendJson(res, 502, { error: err instanceof Error ? err.message : String(err) });
+      }
+    }
+    if (req.method === "POST" && url.pathname === "/realtime-session") {
+      // Mints an ephemeral OpenAI Realtime token (duplex voice spike). Expensive
+      // per-minute audio — rate-limited per IP. The extension connects straight
+      // to OpenAI with the token; audio never passes through us.
+      if (!rateLimit(`live:${clientKey(req)}`, LIVE_PER_HOUR, 3_600_000)) {
+        return sendJson(res, 429, { error: "rate limited" });
+      }
+      const body = await readBody(req, 16_000);
+      const language = typeof body.language === "string" ? body.language : "English";
+      let course = null;
+      if (validId(body.playlistId, PLAYLIST_RE)) course = loadCourse(body.playlistId);
+      try {
+        const instructions = realtimeInstructions({
+          course: course?.map ?? null,
+          videoId: validId(body.videoId, VIDEO_RE) ? body.videoId : undefined,
+          pauseSeconds: Number(body.pauseSeconds) || 0,
+          language,
+        });
+        const token = await mintRealtimeSession(instructions, language);
+        return sendJson(res, 200, { token, grounded: !!course });
       } catch (err) {
         return sendJson(res, 502, { error: err instanceof Error ? err.message : String(err) });
       }

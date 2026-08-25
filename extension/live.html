@@ -1,0 +1,32 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>Raise Your Hand — duplex spike</title>
+<style>
+  body { font-family: ui-sans-serif, system-ui, sans-serif; background:#141210; color:#f1ece2; max-width:720px; margin:40px auto; padding:0 20px; }
+  h1 { font-size:20px; } h1 span { color:#e6a94d; }
+  .row { display:flex; gap:10px; margin:14px 0; flex-wrap:wrap; }
+  input, button { font:inherit; padding:8px 12px; border-radius:8px; border:1px solid #3a352c; background:#1e1a16; color:#f1ece2; }
+  input { flex:1; min-width:180px; }
+  button { cursor:pointer; background:#e6a94d; border:none; color:#141210; font-weight:600; }
+  button:disabled { opacity:.4; cursor:default; }
+  #stop { background:#b0483a; color:#fff; }
+  #status { font-size:14px; color:#a89f8d; margin:10px 0; min-height:20px; }
+  #status.on { color:#7ec97e; }
+  #log { background:#0d0b09; border:1px solid #2a251f; border-radius:10px; padding:14px; height:340px; overflow-y:auto; font-size:14px; line-height:1.5; white-space:pre-wrap; }
+  .you { color:#8ab4f8; } .ta { color:#f2c579; } .sys { color:#6b6455; font-size:12px; } .int { color:#e06c5f; font-weight:600; }
+</style>
+
+<h1>✋ Raise Your Hand — <span>duplex spike</span> (OpenAI Realtime)</h1>
+<div class="row">
+  <input id="backend" value="https://api.raise-your-hand.cloud" title="backend URL" />
+  <input id="playlist" value="PLoROMvodv4rOCXd21gf0CF4xr35yINeOy" title="playlistId (CME295)" />
+  <input id="lang" value="English" style="max-width:110px" title="answer language" />
+</div>
+<div class="row">
+  <button id="start">🎙 Start session</button>
+  <button id="stop" disabled>End</button>
+</div>
+<div id="status">idle</div>
+<div id="log"></div>
+
+<script src="live.js"></script>
