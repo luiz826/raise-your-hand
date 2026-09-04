@@ -12,8 +12,9 @@ services:
       HOST: "0.0.0.0"
       PORT: "8787"
     volumes:
-      - ../data:/app/data          # pre-ingested course maps live here
+      - ../data:/app/data          # pre-ingested course maps live here (must be writable by uid 1000: chown -R 1000:1000 data)
     expose: ["8787"]
+    mem_limit: 1g
     restart: unless-stopped
 
   tts:
@@ -27,8 +28,9 @@ services:
       RYH_VOICE_HOST: "0.0.0.0"
     volumes:
       - voice-models:/app/tts/models
-      - hf-cache:/root/.cache/huggingface
+      - hf-cache:/home/app/.cache/huggingface
     expose: ["8788"]
+    mem_limit: 512m
     restart: unless-stopped
 
   stt:
@@ -42,8 +44,9 @@ services:
       RYH_VOICE_HOST: "0.0.0.0"
     volumes:
       - voice-models:/app/tts/models
-      - hf-cache:/root/.cache/huggingface
+      - hf-cache:/home/app/.cache/huggingface
     expose: ["8789"]
+    mem_limit: 512m
     restart: unless-stopped
 
   caddy:

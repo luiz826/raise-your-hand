@@ -6,7 +6,8 @@ WORKDIR /app
 COPY tts ./tts
 COPY stt ./stt
 COPY deploy/entrypoint-voice.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
+RUN chmod +x /entrypoint.sh && useradd -m -u 1000 app && chown -R app:app /app
+USER app
 
 ENTRYPOINT ["/entrypoint.sh"]
 CMD ["python", "tts/server.py"]

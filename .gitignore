@@ -7,7 +7,6 @@ eval-results/
 raise-your-hand-extension.zip
 extension/vendor/
 my_random_ideas.md
-
 # Kokoro TTS model files (large, fetched separately)
 tts/models/
 

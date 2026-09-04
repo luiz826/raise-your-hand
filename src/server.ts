@@ -9,6 +9,7 @@ import "./lib/env";
 import fs from "node:fs";
 import path from "node:path";
 import http from "node:http";
+import crypto from "node:crypto";
 import { formatTime, type PlaylistInfo, type VideoData } from "./lib/youtube";
 import { buildCourseMap, emptyUsage, type CourseMap } from "./lib/coursemap";
 import { INGEST_MODEL, QA_MODEL } from "./lib/models";
@@ -490,4 +491,10 @@ server.listen(PORT, HOST, () => {
     : [];
   console.log(`Raise Your Hand backend on http://${HOST}:${PORT} (model: ${qaModel.spec})`);
   console.log(`ingested courses: ${courses.length > 0 ? courses.join(", ") : "(none — run npm run ingest)"}`);
+  if (HOST !== "127.0.0.1" && HOST !== "localhost" && ALLOWED_ORIGIN === "*") {
+    console.warn(
+      "⚠️  WARNING: listening on a public interface with CORS '*' — any website can call the paid endpoints. " +
+        "Set RYH_ALLOWED_ORIGIN=https://www.youtube.com before exposing this server.",
+    );
+  }
 });

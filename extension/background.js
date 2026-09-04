@@ -65,12 +65,24 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   // Content script → capture the visible tab frame.
   if (msg.type === "ryh-capture") {
     const windowId = sender.tab ? sender.tab.windowId : chrome.windows.WINDOW_ID_CURRENT;
-    chrome.tabs.captureVisibleTab(windowId, { format: "jpeg", quality: 70 }, (dataUrl) => {
-      if (chrome.runtime.lastError || !dataUrl) {
-        sendResponse({ error: (chrome.runtime.lastError && chrome.runtime.lastError.message) || "capture failed" });
-      } else {
-        sendResponse({ dataUrl });
+    const senderTabId = sender.tab ? sender.tab.id : null;
+    // captureVisibleTab grabs whatever tab is ACTIVE in the window — if the user
+    // flipped to another tab between pressing the mic and the capture, we'd
+    // screenshot (and send to the LLM) an unrelated, possibly sensitive page.
+    // Refuse unless the asking tab is still the active one.
+    chrome.tabs.query({ active: true, windowId }, (tabs) => {
+      const active = tabs && tabs[0];
+      if (senderTabId != null && active && active.id !== senderTabId) {
+        sendResponse({ error: "not the active tab" });
+        return;
       }
+      chrome.tabs.captureVisibleTab(windowId, { format: "jpeg", quality: 70 }, (dataUrl) => {
+        if (chrome.runtime.lastError || !dataUrl) {
+          sendResponse({ error: (chrome.runtime.lastError && chrome.runtime.lastError.message) || "capture failed" });
+        } else {
+          sendResponse({ dataUrl });
+        }
+      });
     });
     return true; // async
   }

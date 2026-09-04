@@ -426,20 +426,29 @@
       if (last < text.length) prose(text.slice(last));
     };
 
-    // Render one $…$ / $$…$$ segment with KaTeX (bundled, local); on any error
-    // fall back to the raw source so a bad formula never breaks the card.
+    // Render one $…$ / $$…$$ segment with KaTeX (lazy-loaded, local); on any error
+    // fall back to the raw source so a bad formula never breaks the card. If
+    // KaTeX is still downloading, show the source now and upgrade in place.
     const appendMath = (parent, src, display) => {
       const span = document.createElement("span");
       span.className = display ? "math" : "math inline";
-      try {
-        if (typeof katex === "undefined") throw new Error("katex not loaded");
-        katex.render(src, span, { displayMode: display, throwOnError: true });
-      } catch (_) { span.textContent = src; }
+      const render = () => {
+        try {
+          if (typeof katex === "undefined") throw new Error("katex not loaded");
+          span.textContent = "";
+          katex.render(src, span, { displayMode: display, throwOnError: true });
+        } catch (_) { span.textContent = src; }
+      };
+      if (typeof katex === "undefined") {
+        span.textContent = src;
+        ensureKatex().then((ok) => { if (ok && span.isConnected) render(); });
+      } else render();
       parent.append(span);
     };
 
     // Accept only a conservative SVG subset from the model: shapes, text, markers.
-    // Strips scriptable vectors (on* handlers, hrefs, script/foreignObject).
+    // Strips scriptable vectors (on* handlers, hrefs, script/foreignObject) and
+    // style attributes (CSS url() in a style attr can fetch external resources).
     const SVG_OK_TAGS = new Set(["svg", "g", "path", "rect", "circle", "ellipse", "line", "polyline", "polygon", "text", "tspan", "defs", "marker", "title", "desc"]);
     function sanitizeSvg(svgText) {
       try {
@@ -451,13 +460,13 @@
             if (!SVG_OK_TAGS.has(node.tagName.toLowerCase())) { node.remove(); continue; }
             for (const attr of [...node.attributes]) {
               const n = attr.name.toLowerCase();
-              if (n.startsWith("on") || n === "href" || n === "xlink:href") node.removeAttribute(attr.name);
+              if (n.startsWith("on") || n === "href" || n === "xlink:href" || n === "style") node.removeAttribute(attr.name);
             }
             walk(node);
           }
         };
         walk(svg);
-        for (const attr of [...svg.attributes]) { const n = attr.name.toLowerCase(); if (n.startsWith("on") || n.includes("href")) svg.removeAttribute(attr.name); }
+        for (const attr of [...svg.attributes]) { const n = attr.name.toLowerCase(); if (n.startsWith("on") || n.includes("href") || n === "style") svg.removeAttribute(attr.name); }
         return document.importNode(svg, true);
       } catch (_) { return null; }
     }

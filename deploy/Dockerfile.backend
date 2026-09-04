@@ -9,6 +9,11 @@ COPY tsconfig.json ./
 COPY src ./src
 # (scripts/ are dev-only CLIs and are excluded by .dockerignore — the server doesn't need them)
 
+# Run as the unprivileged `node` user. /app/data must be writable by it — with a
+# bind-mounted host dir, `chown -R 1000:1000 data` on the host (uid 1000 = node).
+RUN mkdir -p /app/data && chown -R node:node /app
+USER node
+
 ENV NODE_ENV=production
 EXPOSE 8787
 # HOST=0.0.0.0 so Caddy can reach it; keys/model come from the env file.
