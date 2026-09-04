@@ -23,7 +23,7 @@ const PORT = Number(process.env.PORT ?? 8787);
 const HOST = process.env.HOST ?? "127.0.0.1"; // bind localhost by default; set 0.0.0.0 to expose
 const ALLOWED_ORIGIN = process.env.RYH_ALLOWED_ORIGIN ?? "*"; // lock to the extension origin on deploy
 const API_TOKEN = process.env.RYH_API_TOKEN ?? ""; // if set, a matching Bearer token bypasses the /ingest rate limit (maintainer batch ingests)
-const LOG_TEXT = process.env.RYH_LOG_TEXT !== "0"; // set 0 to omit question/answer text from telemetry
+const LOG_TEXT = process.env.RYH_LOG_TEXT === "1"; // opt-in: store question/answer text in telemetry (default: lengths only, per the privacy policy)
 const qaModel = resolveModel(QA_MODEL);
 
 // IDs arrive from the client and end up in filesystem paths, so validate them
@@ -40,9 +40,36 @@ const LIVE_PER_HOUR = Number(process.env.RYH_LIVE_PER_HOUR ?? 10);
 const MAX_CONCURRENT_INGESTS = Number(process.env.RYH_MAX_INGESTS ?? 2);
 
 // Rate-limit by source IP — not the client-supplied deviceId (which can be
-// rotated to bypass limits). Behind a proxy, trust X-Forwarded-For instead.
+// rotated to bypass limits). Behind Caddy the socket peer is the Docker bridge
+// IP for EVERYONE, so the real client IP comes from X-Forwarded-For — but only
+// trust that header when the peer is a loopback/private proxy address (the
+// Caddyfile overwrites the header with {remote_host} so clients can't spoof it).
+function isTrustedProxy(ip: string): boolean {
+  const a = ip.startsWith("::ffff:") ? ip.slice(7) : ip;
+  if (a === "127.0.0.1" || a === "::1") return true;
+  const m = a.match(/^(\d+)\.(\d+)\./);
+  if (!m) return false;
+  const x = Number(m[1]), y = Number(m[2]);
+  return x === 10 || (x === 172 && y >= 16 && y <= 31) || (x === 192 && y === 168);
+}
+
 function clientKey(req: http.IncomingMessage): string {
-  return req.socket.remoteAddress || "unknown";
+  const peer = req.socket.remoteAddress || "unknown";
+  if (isTrustedProxy(peer)) {
+    const xff = req.headers["x-forwarded-for"];
+    const first = (Array.isArray(xff) ? xff[0] : xff)?.split(",")[0].trim();
+    if (first) return first.slice(0, 64);
+  }
+  return peer;
+}
+
+// Drive-by protection for paid endpoints: browsers always send Origin on a
+// preflighted POST, so a mismatch means some other website is making its
+// visitors spend our API credits. (Not an auth check — rate limits cover curl.)
+function originAllowed(req: http.IncomingMessage): boolean {
+  if (ALLOWED_ORIGIN === "*") return true; // local dev
+  const origin = req.headers.origin;
+  return !origin || origin === ALLOWED_ORIGIN;
 }
 
 function checkToken(req: http.IncomingMessage): boolean {
@@ -223,8 +250,8 @@ async function handleAsk(res: http.ServerResponse, body: AskBody, key: string) {
     });
     emit({ type: "done", answerId, usage });
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    emit({ type: "error", message });
+    console.error("ask failed:", err instanceof Error ? err.message : err);
+    emit({ type: "error", message: "Something went wrong on our side — please try again." });
   } finally {
     res.end();
   }
@@ -306,9 +333,19 @@ async function handleIngest(res: http.ServerResponse, body: IngestBody, key: str
     );
     fs.writeFileSync(path.join(dir, "coursemap.json"), JSON.stringify(map, null, 2));
     courseCache.delete(playlistId); // force reload with the freshly-built map
+    // Provenance: course maps are SHARED by all users, so if one is ever
+    // poisoned (prompt injection via uploaded transcripts) we need to know
+    // which client uploaded it. Store a hash, not the raw IP.
+    const byHash = crypto.createHash("sha1").update(key).digest("hex").slice(0, 12);
+    fs.writeFileSync(
+      path.join(dir, "ingest-meta.json"),
+      JSON.stringify({ ingestedAt: new Date().toISOString(), by: byHash, videos: valid.length }, null, 2),
+    );
+    logEvent({ t: "ingest", by: byHash, playlistId, lectures: map.lectures.length });
     emit({ type: "done", lectureCount: map.lectures.length, courseTitle: map.courseTitle });
   } catch (err) {
-    emit({ type: "error", message: err instanceof Error ? err.message : String(err) });
+    console.error("ingest failed:", err instanceof Error ? err.message : err);
+    emit({ type: "error", message: "Course preparation failed on our side — please try again." });
   } finally {
     if (gotSlot) releaseIngestSlot();
     res.end();
@@ -351,6 +388,9 @@ const server = http.createServer(async (req, res) => {
     }
     if (req.method === "POST" && url.pathname === "/illustrate") {
       // Paid image API (gpt-image-1) — cached by course+answer, rate-limited per IP.
+      if (!originAllowed(req)) {
+        return sendJson(res, 403, { error: "origin not allowed" });
+      }
       if (!rateLimit(`ill:${clientKey(req)}`, ILLUSTRATE_PER_HOUR, 3_600_000)) {
         return sendJson(res, 429, { error: "rate limited" });
       }
@@ -376,13 +416,17 @@ const server = http.createServer(async (req, res) => {
         }
         return sendJson(res, 200, { url: `/illustrations/${key}.png`, cached: !!cached });
       } catch (err) {
-        return sendJson(res, 502, { error: err instanceof Error ? err.message : String(err) });
+        console.error("illustrate failed:", err instanceof Error ? err.message : err);
+        return sendJson(res, 502, { error: "Illustration failed — please try again." });
       }
     }
     if (req.method === "POST" && url.pathname === "/realtime-session") {
       // Mints an ephemeral OpenAI Realtime token (duplex voice spike). Expensive
       // per-minute audio — rate-limited per IP. The extension connects straight
       // to OpenAI with the token; audio never passes through us.
+      if (!originAllowed(req)) {
+        return sendJson(res, 403, { error: "origin not allowed" });
+      }
       if (!rateLimit(`live:${clientKey(req)}`, LIVE_PER_HOUR, 3_600_000)) {
         return sendJson(res, 429, { error: "rate limited" });
       }
@@ -400,7 +444,8 @@ const server = http.createServer(async (req, res) => {
         const token = await mintRealtimeSession(instructions, language);
         return sendJson(res, 200, { token, grounded: !!course });
       } catch (err) {
-        return sendJson(res, 502, { error: err instanceof Error ? err.message : String(err) });
+        console.error("realtime session failed:", err instanceof Error ? err.message : err);
+        return sendJson(res, 502, { error: "Couldn't start a live session — please try again." });
       }
     }
     if (req.method === "POST" && url.pathname === "/heartbeat") {
@@ -432,7 +477,8 @@ const server = http.createServer(async (req, res) => {
     }
     sendJson(res, 404, { error: "not found" });
   } catch (err) {
-    sendJson(res, 500, { error: err instanceof Error ? err.message : String(err) });
+    console.error("request failed:", err instanceof Error ? err.message : err);
+    sendJson(res, 500, { error: "internal error" });
   }
 });
 

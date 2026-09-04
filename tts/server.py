@@ -40,6 +40,10 @@ PORT = int(os.environ.get("RYH_TTS_PORT", "8788"))
 HOST = os.environ.get("RYH_VOICE_HOST", "127.0.0.1")  # 0.0.0.0 in Docker so Caddy can reach it
 MIME = {"mp3": "audio/mpeg", "wav": "audio/wav", "opus": "audio/ogg", "aac": "audio/aac", "flac": "audio/flac"}.get(FMT, "audio/mpeg")
 VOICES = {"alloy", "ash", "ballad", "coral", "echo", "fable", "onyx", "nova", "sage", "shimmer", "verse"}  # per-request voice allowlist
+# Drive-by protection: browsers always send Origin on a preflighted POST, so a
+# mismatched Origin means another website is spending our TTS credits through
+# its visitors. (Not an auth check — curl is covered by the Caddy rate limits.)
+ALLOWED_ORIGIN = os.environ.get("RYH_ALLOWED_ORIGIN", "https://www.youtube.com")
 
 if not API_KEY:
     sys.stderr.write("WARNING: OPENAI_API_KEY not set — /tts will fail until it is.\n")
@@ -98,6 +102,12 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         if not urlparse(self.path).path.startswith("/tts"):
             self.send_response(404)
+            self._cors()
+            self.end_headers()
+            return
+        origin = self.headers.get("Origin")
+        if ALLOWED_ORIGIN != "*" and origin and origin != ALLOWED_ORIGIN:
+            self.send_response(403)
             self._cors()
             self.end_headers()
             return

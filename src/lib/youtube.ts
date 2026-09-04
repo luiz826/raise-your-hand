@@ -2,6 +2,9 @@
 // caption (timedtext) endpoints — the same surfaces the Chrome extension will
 // use in-page later. Works from residential IPs; datacenter IPs get blocked.
 
+import dns from "node:dns/promises";
+import net from "node:net";
+
 const UA =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
 
@@ -304,11 +307,98 @@ export function extractUrls(text: string): string[] {
   return [...new Set(clean)];
 }
 
+// The course-site URL is picked by the model from URLs in CLIENT-UPLOADED video
+// descriptions (/ingest is public), so treat it as attacker-controlled: only
+// fetch https URLs that resolve to public IPs, re-validating every redirect hop.
+// Otherwise /ingest becomes an SSRF oracle into the server's private network
+// (cloud metadata at 169.254.169.254, internal services, …).
+function isPrivateIp(ip: string): boolean {
+  let a = ip.toLowerCase();
+  if (a.startsWith("::ffff:")) a = a.slice(7); // IPv4-mapped IPv6
+  if (a.includes(":")) {
+    return (
+      a === "::" ||
+      a === "::1" ||
+      a.startsWith("fc") ||
+      a.startsWith("fd") || // unique-local
+      /^fe[89ab]/.test(a) // link-local
+    );
+  }
+  const p = a.split(".").map(Number);
+  if (p.length !== 4 || p.some((n) => Number.isNaN(n))) return true; // unparseable → refuse
+  return (
+    p[0] === 0 ||
+    p[0] === 10 ||
+    p[0] === 127 ||
+    (p[0] === 172 && p[1] >= 16 && p[1] <= 31) ||
+    (p[0] === 192 && p[1] === 168) ||
+    (p[0] === 169 && p[1] === 254) || // link-local / cloud metadata
+    p[0] >= 224 // multicast + reserved
+  );
+}
+
+async function assertPublicUrl(raw: string): Promise<URL> {
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw new Error("course site URL is not a valid URL");
+  }
+  if (url.protocol !== "https:") throw new Error("course site must be https");
+  const host = url.hostname.toLowerCase();
+  if (!host || host === "localhost" || host.endsWith(".local") || host.endsWith(".internal")) {
+    throw new Error("course site host is not allowed");
+  }
+  const addrs = net.isIP(host)
+    ? [host]
+    : (await dns.lookup(host, { all: true, verbatim: true })).map((r) => r.address);
+  if (addrs.length === 0 || addrs.some(isPrivateIp)) {
+    throw new Error("course site resolves to a non-public address");
+  }
+  return url;
+}
+
 export async function fetchSiteText(
   url: string,
   maxChars = 8000,
 ): Promise<string> {
-  const html = await fetchPage(url);
+  let current = await assertPublicUrl(url);
+  let res: Response | null = null;
+  for (let hop = 0; hop < 3; hop++) {
+    res = await fetch(current, {
+      headers: { "User-Agent": UA, "Accept-Language": "en-US,en;q=0.9" },
+      redirect: "manual", // validate each hop ourselves
+    });
+    if (res.status >= 300 && res.status < 400) {
+      const loc = res.headers.get("location");
+      if (!loc) throw new Error(`redirect without a Location from ${current.hostname}`);
+      current = await assertPublicUrl(new URL(loc, current).toString());
+      res = null;
+      continue;
+    }
+    break;
+  }
+  if (!res) throw new Error("course site redirected too many times");
+  if (!res.ok) throw new Error(`GET ${current} -> HTTP ${res.status}`);
+  // Cap the bytes read — a hostile page must not exhaust server memory.
+  const MAX_BYTES = 256 * 1024;
+  const chunks: Buffer[] = [];
+  let total = 0;
+  if (res.body) {
+    const reader = res.body.getReader();
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      total += value.length;
+      if (total > MAX_BYTES) {
+        chunks.push(Buffer.from(value.subarray(0, value.length - (total - MAX_BYTES))));
+        await reader.cancel().catch(() => {});
+        break;
+      }
+      chunks.push(Buffer.from(value));
+    }
+  }
+  const html = Buffer.concat(chunks).toString("utf8");
   return html
     .replace(/<script[\s\S]*?<\/script>/gi, " ")
     .replace(/<style[\s\S]*?<\/style>/gi, " ")

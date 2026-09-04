@@ -2,8 +2,13 @@
 # /tts and /stt go to the voice servers (rate-limited per client IP so nobody
 # can hammer the paid OpenAI voice endpoints). /ingest and /ask are also
 # rate-limited: both spend Anthropic credits, and /ingest is public + expensive
-# (a full course build), so it's capped hard per IP. Everything else (/course,
-# /feedback, /heartbeat, /health) goes to the backend unthrottled.
+# (a full course build), so it's capped hard per IP. /illustrate and
+# /realtime-session also spend money (gpt-image-1 / OpenAI Realtime) and get
+# per-IP hourly zones. Everything else (/course, /feedback, /heartbeat,
+# /health) goes to the backend unthrottled, where the app's own per-IP limits
+# apply. Every proxy hop OVERWRITES X-Forwarded-For with the real client IP —
+# the backend trusts that header for its per-IP rate limits, so a client must
+# never be able to smuggle their own value through.
 {
 	order rate_limit before reverse_proxy
 }
@@ -39,7 +44,9 @@
 				window 1h
 			}
 		}
-		reverse_proxy backend:8787
+		reverse_proxy backend:8787 {
+			header_up X-Forwarded-For {remote_host}
+		}
 	}
 	handle /ask* {
 		rate_limit {
@@ -49,10 +56,38 @@
 				window 1m
 			}
 		}
-		reverse_proxy backend:8787
+		reverse_proxy backend:8787 {
+			header_up X-Forwarded-For {remote_host}
+		}
+	}
+	handle /illustrate* {
+		rate_limit {
+			zone illustrate {
+				key {remote_host}
+				events 10
+				window 1h
+			}
+		}
+		reverse_proxy backend:8787 {
+			header_up X-Forwarded-For {remote_host}
+		}
+	}
+	handle /realtime-session* {
+		rate_limit {
+			zone live {
+				key {remote_host}
+				events 10
+				window 1h
+			}
+		}
+		reverse_proxy backend:8787 {
+			header_up X-Forwarded-For {remote_host}
+		}
 	}
 	handle {
-		reverse_proxy backend:8787
+		reverse_proxy backend:8787 {
+			header_up X-Forwarded-For {remote_host}
+		}
 	}
 }
 

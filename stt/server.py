@@ -33,6 +33,10 @@ MODEL = os.environ.get("RYH_STT_MODEL", "gpt-4o-transcribe")
 BASE = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/")
 PORT = int(os.environ.get("RYH_STT_PORT", "8789"))
 HOST = os.environ.get("RYH_VOICE_HOST", "127.0.0.1")  # 0.0.0.0 in Docker so Caddy can reach it
+# Drive-by protection: browsers always send Origin on a preflighted POST, so a
+# mismatched Origin means another website is spending our STT credits through
+# its visitors. (Not an auth check — curl is covered by the Caddy rate limits.)
+ALLOWED_ORIGIN = os.environ.get("RYH_ALLOWED_ORIGIN", "https://www.youtube.com")
 
 if not API_KEY:
     sys.stderr.write("WARNING: OPENAI_API_KEY not set — /stt will fail until it is.\n")
@@ -119,6 +123,12 @@ class Handler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         if not parsed.path.startswith("/stt"):
             self.send_response(404)
+            self._cors()
+            self.end_headers()
+            return
+        origin = self.headers.get("Origin")
+        if ALLOWED_ORIGIN != "*" and origin and origin != ALLOWED_ORIGIN:
+            self.send_response(403)
             self._cors()
             self.end_headers()
             return
