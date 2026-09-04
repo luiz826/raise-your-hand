@@ -82,19 +82,32 @@ interface LoadedCourse {
   map: CourseMap;
   videos: Map<number, VideoData>;
 }
+// LRU, insertion-ordered: a public server accumulates every prepared course
+// (several MB of transcripts each), so cap how many live in RAM — the rest are
+// re-read from disk on demand.
+const MAX_CACHED_COURSES = Number(process.env.RYH_COURSE_CACHE ?? 20);
 const courseCache = new Map<string, LoadedCourse | null>();
 
 function loadCourse(playlistId: string): LoadedCourse | null {
-  if (courseCache.has(playlistId)) return courseCache.get(playlistId)!;
+  const hit = courseCache.get(playlistId);
+  if (hit !== undefined) {
+    courseCache.delete(playlistId); // refresh recency
+    courseCache.set(playlistId, hit);
+    return hit;
+  }
   const dir = path.join("data", playlistId);
   const mapFile = path.join(dir, "coursemap.json");
-  if (!fs.existsSync(mapFile)) {
-    courseCache.set(playlistId, null);
-    return null;
+  let loaded: LoadedCourse | null = null;
+  if (fs.existsSync(mapFile)) {
+    const map = JSON.parse(fs.readFileSync(mapFile, "utf8")) as CourseMap;
+    loaded = { map, videos: new Map() };
   }
-  const map = JSON.parse(fs.readFileSync(mapFile, "utf8")) as CourseMap;
-  const loaded: LoadedCourse = { map, videos: new Map() };
   courseCache.set(playlistId, loaded);
+  while (courseCache.size > MAX_CACHED_COURSES) {
+    const oldest = courseCache.keys().next().value;
+    if (oldest === undefined) break;
+    courseCache.delete(oldest);
+  }
   return loaded;
 }
 

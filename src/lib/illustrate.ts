@@ -9,6 +9,22 @@ import crypto from "node:crypto";
 
 const OPENAI_KEY = process.env.OPENAI_API_KEY ?? "";
 const DIR = path.join("data", "illustrations");
+// Illustrations are cached forever by content hash — cap the directory so a
+// busy server can't grow it without bound (oldest by mtime evicted on write).
+const MAX_ILLUSTRATIONS = Number(process.env.RYH_MAX_ILLUSTRATIONS ?? 500);
+
+function pruneIllustrations(): void {
+  try {
+    const files = fs.readdirSync(DIR).filter((f) => f.endsWith(".png"));
+    if (files.length <= MAX_ILLUSTRATIONS) return;
+    const oldestFirst = files
+      .map((f) => ({ f, m: fs.statSync(path.join(DIR, f)).mtimeMs }))
+      .sort((a, b) => a.m - b.m);
+    for (const { f } of oldestFirst.slice(0, files.length - MAX_ILLUSTRATIONS)) {
+      fs.unlinkSync(path.join(DIR, f));
+    }
+  } catch { /* eviction is best-effort */ }
+}
 
 export function illustrationKey(playlistId: string, answer: string): string {
   return crypto.createHash("sha1").update(`${playlistId}\n${answer.slice(0, 800)}`).digest("hex");
@@ -46,5 +62,6 @@ export async function generateIllustration(opts: {
   fs.mkdirSync(DIR, { recursive: true });
   const p = path.join(DIR, `${opts.key}.png`);
   fs.writeFileSync(p, Buffer.from(b64, "base64"));
+  pruneIllustrations();
   return p;
 }

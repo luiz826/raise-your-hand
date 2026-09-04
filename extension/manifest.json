@@ -22,7 +22,6 @@
         "*://www.youtube.com/watch*"
       ],
       "js": [
-        "vendor/katex/katex.min.js",
         "content.js"
       ],
       "css": [

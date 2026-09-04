@@ -56,18 +56,20 @@ async function start() {
     });
     debug(`camera up: ${videoEl.videoWidth}x${videoEl.videoHeight}, readyState=${videoEl.readyState}`);
 
-    const fileset = await FilesetResolver.forVisionTasks("./vendor/wasm");
-    landmarker = await HandLandmarker.createFromOptions(fileset, {
-      baseOptions: { modelAssetPath: "./vendor/hand_landmarker.task" },
-      numHands: 1,
-      runningMode: "VIDEO",
-      // Higher detection confidence so a half-seen/hallucinated hand doesn't fire.
-      minHandDetectionConfidence: 0.6,
-      minHandPresenceConfidence: 0.5,
-      minTrackingConfidence: 0.5,
-    });
+    if (!landmarker) {
+      const fileset = await FilesetResolver.forVisionTasks("./vendor/wasm");
+      landmarker = await HandLandmarker.createFromOptions(fileset, {
+        baseOptions: { modelAssetPath: "./vendor/hand_landmarker.task" },
+        numHands: 1,
+        runningMode: "VIDEO",
+        // Higher detection confidence so a half-seen/hallucinated hand doesn't fire.
+        minHandDetectionConfidence: 0.6,
+        minHandPresenceConfidence: 0.5,
+        minTrackingConfidence: 0.5,
+      });
+    }
 
-    timer = setInterval(detect, 120);
+    if (!timer) timer = setInterval(detect, 120);
     send({ type: "ryh-gesture-ready" });
   } catch (e) {
     // An offscreen document can't show the camera permission prompt. If the
@@ -80,6 +82,15 @@ async function start() {
       send({ type: "ryh-gesture-error", message: String((e && e.message) || e) });
     }
   }
+}
+
+// Release the camera (tracks + element) but keep the loaded model — re-acquiring
+// the camera is ~100-300ms once granted, while re-loading MediaPipe/WASM is the
+// slow part we only want to pay once.
+function stopCamera() {
+  if (timer) { clearInterval(timer); timer = null; }
+  try { if (stream) { stream.getTracks().forEach((t) => t.stop()); stream = null; } } catch (_) {}
+  try { if (videoEl) { videoEl.srcObject = null; videoEl.remove(); videoEl = null; } } catch (_) {}
 }
 
 // "Hand raised" = the deliberate classroom gesture: an OPEN palm held up high —
@@ -141,22 +152,29 @@ function detect() {
 }
 
 // The content script suspends detection while a question is being asked and
-// answered, so hand movement mid-turn can't fire another trigger. We stop and
-// restart the loop; the camera stays on, so resuming is instant. On resume we
-// require a fresh down→up so a hand that's still up doesn't immediately re-fire.
+// answered, so hand movement mid-turn can't fire another trigger. Suspending
+// also RELEASES the camera (Q&A turns can run for minutes — keeping the webcam
+// hot the whole time wastes battery and keeps the camera LED on); resuming
+// re-acquires it, which is fast once the grant exists. On resume we require a
+// fresh down→up so a hand that's still up doesn't immediately re-fire.
+let starting = false;
 function setDetecting(on) {
   if (on) {
-    if (!timer && landmarker) {
+    if (!timer && landmarker && !starting) {
       handWasDown = false; // require a fresh down→up so a still-raised hand won't re-fire
       lastRaise = 0;       // but don't impose an extra debounce wait on resume
       raisedStreak = 0;    // require a fresh sustained hold
-      timer = setInterval(detect, 120);
-      debug("detection resumed");
+      if (!stream) {
+        starting = true;
+        debug("camera re-acquiring…");
+        start().finally(() => { starting = false; });
+      } else {
+        timer = setInterval(detect, 120);
+        debug("detection resumed");
+      }
     }
-  } else if (timer) {
-    clearInterval(timer);
-    timer = null;
-    debug("detection suspended");
+  } else {
+    if (timer || stream) { stopCamera(); debug("detection suspended, camera released"); }
   }
 }
 

@@ -337,15 +337,30 @@
         </div>
       </div>`;
 
-    // KaTeX's stylesheet + fonts can't reach the shadow root via content-script
-    // CSS, so inline them here with font URLs rewritten to extension URLs.
-    try {
-      fetch(chrome.runtime.getURL("vendor/katex/katex.min.css")).then((r) => r.text()).then((css) => {
-        const st = document.createElement("style");
-        st.textContent = css.replace(/url\(/g, `url(${chrome.runtime.getURL("vendor/katex/")}`);
-        root.appendChild(st);
-      }).catch(() => {});
-    } catch (_) {}
+    // KaTeX (226KB JS + fonts) is needed only when an answer actually contains
+    // math — most don't — so load it lazily on first use instead of injecting it
+    // into every YouTube watch page. Its stylesheet/fonts can't reach the shadow
+    // root via content-script CSS, so inline them with font URLs rewritten to
+    // extension URLs.
+    let katexPromise = null;
+    const ensureKatex = () => {
+      if (typeof katex !== "undefined") return Promise.resolve(true);
+      if (!katexPromise) {
+        try {
+          fetch(chrome.runtime.getURL("vendor/katex/katex.min.css")).then((r) => r.text()).then((css) => {
+            const st = document.createElement("style");
+            st.textContent = css.replace(/url\(/g, `url(${chrome.runtime.getURL("vendor/katex/")}`);
+            root.appendChild(st);
+          }).catch(() => {});
+          katexPromise = import(chrome.runtime.getURL("vendor/katex/katex.min.js"))
+            .then(() => typeof katex !== "undefined")
+            .catch(() => false);
+        } catch (_) {
+          katexPromise = Promise.resolve(false); // injection context without chrome.runtime
+        }
+      }
+      return katexPromise;
+    };
 
     const layer = root.querySelector(".layer");
     const q = (s) => root.querySelector(s);
@@ -358,7 +373,7 @@
     document.addEventListener("mousemove", () => {
       layer.classList.add("hot"); clearTimeout(dockTimer);
       dockTimer = setTimeout(() => layer.classList.remove("hot"), 2200);
-    });
+    }, { passive: true });
     layer.classList.add("hot"); // brief reveal on load so the dock is discoverable
     setTimeout(() => layer.classList.remove("hot"), 4000);
 
@@ -1115,6 +1130,7 @@
 
   // Synthesize one sentence → object URL (null if the turn was superseded).
   function ttsFetch(sentence, token) {
+    if (token !== speechToken) return Promise.resolve(null); // barged-in/stopped — don't spend TTS chars
     return fetch(`${TTS_BACKEND}/tts`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: sentence, voice: ttsVoice, speed: ttsSpeed }) })
       .then((r) => (r.ok ? r.blob() : Promise.reject(new Error("tts"))))
       .then((blob) => (token === speechToken ? URL.createObjectURL(blob) : null));

@@ -56,7 +56,12 @@ chrome.tabs.onRemoved.addListener((tabId) => {
     permissionTabId = null;
     relayToContent({ type: "ryh-gesture-error", message: "Camera permission was not granted." });
     teardown();
+    return;
   }
+  // The YouTube tab that started hands-free went away — nothing can receive
+  // gestures anymore, so shut the camera + offscreen document down instead of
+  // running the webcam forever with nobody listening.
+  if (tabId === gestureTabId) teardown();
 });
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
