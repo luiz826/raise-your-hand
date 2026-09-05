@@ -587,6 +587,11 @@
     host.id = "ryh-root";
     Object.assign(host.style, { position: "fixed", inset: "0", zIndex: "2147483000", pointerEvents: "none" });
     document.documentElement.append(host);
+    // Hide the whole overlay while the YouTube player is fullscreen — the dock,
+    // cue and answer card shouldn't float over the movie. Restored on exit.
+    const syncFullscreen = () => { host.style.display = document.fullscreenElement ? "none" : ""; };
+    document.addEventListener("fullscreenchange", syncFullscreen);
+    syncFullscreen();
     view = createView(host, {
       onToggleHandRaise: toggleHandRaise,
       onTapToTalk: () => startTurn(),
